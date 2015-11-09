@@ -12,8 +12,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import ciscoconfparse
 import netaddr
+
+from oslo_utils import importutils
 
 from neutron.common import constants
 
@@ -23,6 +24,8 @@ from networking_cisco.plugins.cisco.extensions import routerrole
 
 import re
 import xml.etree.ElementTree as ET
+
+ciscoconfparse = importutils.try_import('ciscoconfparse')
 
 HA_INFO = 'ha_info'
 ROUTER_ROLE_ATTR = routerrole.ROUTER_ROLE_ATTR
