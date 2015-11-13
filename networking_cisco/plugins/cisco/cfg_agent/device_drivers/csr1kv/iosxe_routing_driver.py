@@ -681,8 +681,7 @@ class IosXeRoutingDriver(devicedriver_api.RoutingDriverBase):
                           'ip': self._host_ip, 'confstr': conf_str}
                 raise cfg_exc.CSR1kvConfigException(**params)
 
-    @staticmethod
-    def _check_response(rpc_obj, snippet_name, conf_str=None):
+    def _check_response(self, rpc_obj, snippet_name, conf_str=None):
         """This function checks the rpc response object for status.
 
         This function takes as input the response rpc_obj and the snippet name
