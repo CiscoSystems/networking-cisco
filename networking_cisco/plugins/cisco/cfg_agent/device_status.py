@@ -154,7 +154,7 @@ class DeviceStatus(object):
         hd_id = hosting_device['id']
         hd_mgmt_ip = hosting_device['management_ip_address']
 
-        dead_hd_list = self._dev_status.get_dead_hosting_devices_info()
+        dead_hd_list = self.get_dead_hosting_devices_info()
         if hd_id in dead_hd_list:
             LOG.debug("Hosting device: %(hd_id)s@%(ip)s is already marked as"
                       " Dead. It is assigned as non-reachable",
