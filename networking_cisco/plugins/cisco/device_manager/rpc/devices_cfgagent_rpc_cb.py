@@ -12,6 +12,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import six
+
 import oslo_messaging
 
 from networking_cisco.plugins.cisco.common import cisco_constants as const
@@ -70,7 +72,7 @@ class DeviceMgrCfgRpcCallback(object):
                     ...}
         @return: -
         """
-        for status, hd_ids in status_info.iteritems():
+        for status, hd_ids in six.iteritems(status_info):
             # update hosting device entry in db to new status
             hd_spec = {'hosting_device': {'status': status}}
             for hd_id in hd_ids:

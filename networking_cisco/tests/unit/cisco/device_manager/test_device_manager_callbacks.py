@@ -13,6 +13,7 @@
 #    under the License.
 
 import mock
+import six
 
 from networking_cisco.plugins.cisco.common import cisco_constants as const
 from networking_cisco.plugins.cisco.device_manager.rpc import (
@@ -53,7 +54,7 @@ class TestCfgAgentDeviceManagerCallbacks(base.BaseTestCase):
         host = 'some_host'
         cb.update_hosting_device_status(ctx, host, status_info)
         non_resp_calls = []
-        for status, hd_ids in status_info.iteritems():
+        for status, hd_ids in six.iteritems(status_info):
             hd_spec = {'hosting_device': {'status': status}}
             update_calls = [mock.call(ctx, hd_id, hd_spec)
                             for hd_id in hd_ids]
