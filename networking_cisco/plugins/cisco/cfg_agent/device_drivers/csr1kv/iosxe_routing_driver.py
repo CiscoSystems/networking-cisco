@@ -37,8 +37,6 @@ manager = importutils.try_import('ncclient.manager')
 
 LOG = logging.getLogger(__name__)
 
-# HA constants
-HA_INFO = 'ha_info'
 
 # N1kv constants
 T1_PORT_NAME_PREFIX = 't1_p:'  # T1 port/network is for VXLAN
@@ -81,7 +79,7 @@ class IosXeRoutingDriver(devicedriver_api.RoutingDriverBase):
 
     def internal_network_added(self, ri, port):
         self._create_sub_interface(ri, port)
-        if port.get(HA_INFO) is not None and ri.get(ha.ENABLED, False):
+        if port.get(ha.HA_INFO) is not None and ri.get(ha.ENABLED, False):
             self._add_ha(ri, port)
 
     def internal_network_removed(self, ri, port):
@@ -150,7 +148,7 @@ class IosXeRoutingDriver(devicedriver_api.RoutingDriverBase):
 
     def _add_ha_hsrp(self, ri, port):
         priority = ri[ha.DETAILS][ha.PRIORITY]
-        port_ha_info = port[HA_INFO]
+        port_ha_info = port[ha.HA_INFO]
         group = port_ha_info['group']
         ip = port_ha_info['ha_port']['fixed_ips'][0]['ip_address']
         if ip and group and priority:
@@ -338,7 +336,7 @@ class IosXeRoutingDriver(devicedriver_api.RoutingDriverBase):
         parse = ciscoconfparse.CiscoConfParse(ios_cfg)
         itfcs_raw = parse.find_lines("^interface GigabitEthernet")
         itfcs = [raw_if.strip().split(' ')[1] for raw_if in itfcs_raw]
-        LOG.debug("Interfaces on hosting device: %s" % itfcs)
+        LOG.debug("Interfaces on hosting device: %s", itfcs)
         return itfcs
 
     def _get_interface_ip(self, interface_name):
@@ -353,7 +351,7 @@ class IosXeRoutingDriver(devicedriver_api.RoutingDriverBase):
         for line in children:
             if 'ip address' in line:
                 ip_address = line.strip().split(' ')[2]
-                LOG.debug("IP Address:%s" % ip_address)
+                LOG.debug("IP Address:%s", ip_address)
                 return ip_address
         LOG.warning(_LW("Cannot find interface: %s"), interface_name)
         return None
@@ -672,7 +670,6 @@ class IosXeRoutingDriver(devicedriver_api.RoutingDriverBase):
             # ncclient version is increased.
             if re.search(r"REMOVE_|DELETE_", snippet):
                 LOG.error(_LE("Pass exception for %s"), snippet)
-                pass
             elif isinstance(e, ncclient.operations.rpc.RPCError):
                 e_tag = e.tag
                 e_type = e.type

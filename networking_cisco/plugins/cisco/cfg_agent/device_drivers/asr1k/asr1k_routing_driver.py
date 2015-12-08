@@ -35,7 +35,6 @@ LOG = logging.getLogger(__name__)
 
 
 DEVICE_OWNER_ROUTER_GW = constants.DEVICE_OWNER_ROUTER_GW
-HA_INFO = 'ha_info'
 ROUTER_ROLE_ATTR = routerrole.ROUTER_ROLE_ATTR
 ROUTER_ROLE_HA_REDUNDANCY = cisco_constants.ROUTER_ROLE_HA_REDUNDANCY
 ROUTER_ROLE_GLOBAL = cisco_constants.ROUTER_ROLE_GLOBAL
@@ -165,10 +164,9 @@ class ASR1kRoutingDriver(iosxe_driver.IosXeRoutingDriver):
         return True
 
     def _handle_external_gateway_added_global_router(self, ri, ext_gw_port):
-        # TODO(bobmel): Get the HA virtual IP correctly
         # TODO(sridar):
         # This seems to work fine. Keeping this todo until more testing.
-        virtual_gw_port = ext_gw_port["ha_info"]["ha_port"]
+        virtual_gw_port = ext_gw_port[ha.HA_INFO]['ha_port']
         sub_itfc_ip = virtual_gw_port['fixed_ips'][0]['ip_address']
         if self._is_port_v6(ext_gw_port):
             LOG.debug("Adding IPv6 external network port: %(port)s for global "
@@ -224,7 +222,14 @@ class ASR1kRoutingDriver(iosxe_driver.IosXeRoutingDriver):
         self._do_create_sub_interface(sub_interface, vlan, vrf_name, hsrp_ip,
                                       net_mask, is_external)
         # Always do HSRP
-        self._add_ha_hsrp(ri, port)
+        if ri.router.get(ha.ENABLED, False):
+            if port.get(ha.HA_INFO) is not None:
+                self._add_ha_hsrp(ri, port)
+            else:
+                # We are missing HA data, candidate for retrying
+                params = {'r_id': ri.router_id, 'p_id': port['id'],
+                          'port': port}
+                raise cfg_exc.HAParamsMissingException(**params)
 
     def _do_create_sub_interface(self, sub_interface, vlan_id, vrf_name, ip,
                                  mask, is_external=False):
@@ -253,7 +258,8 @@ class ASR1kRoutingDriver(iosxe_driver.IosXeRoutingDriver):
     def _set_nat_pool(self, ri, gw_port, is_delete):
         vrf_name = self._get_vrf_name(ri)
         if ri.router.get(ROUTER_ROLE_ATTR) == ROUTER_ROLE_HA_REDUNDANCY:
-            pool_ip = gw_port[HA_INFO]['ha_port']['fixed_ips'][0]['ip_address']
+            pool_ip = gw_port[ha.HA_INFO]['ha_port']['fixed_ips'][0][
+                'ip_address']
             pool_ip_prefix_len = gw_port['fixed_ips'][0]['prefixlen']
         else:
             pool_ip = gw_port['fixed_ips'][0]['ip_address']
@@ -326,7 +332,7 @@ class ASR1kRoutingDriver(iosxe_driver.IosXeRoutingDriver):
                     priority = router[ha.PRIORITY]
         else:
             priority = ri.router[ha.DETAILS][ha.PRIORITY]
-        port_ha_info = port[HA_INFO]
+        port_ha_info = port[ha.HA_INFO]
         group = port_ha_info['group']
         ip = port_ha_info['ha_port']['fixed_ips'][0]['ip_address']
         vlan = port['hosting_info']['segmentation_id']
@@ -423,10 +429,6 @@ class ASR1kRoutingDriver(iosxe_driver.IosXeRoutingDriver):
     def _is_port_v6(port):
         return netaddr.IPNetwork(port['subnets'][0]['cidr']).version == 6
 
-    @staticmethod
-    def _get_hsrp_grp_num_from_ri(ri):
-        return ri.router['ha_info']['group']
-
     def _nat_rules_for_internet_access(self,
                                        acl_no,
                                        network,
@@ -466,7 +468,7 @@ class ASR1kRoutingDriver(iosxe_driver.IosXeRoutingDriver):
         try:
             self._edit_running_config(conf_str, 'SET_DYN_SRC_TRL_POOL')
         except Exception as dyn_nat_e:
-            LOG.info(_LE("Ignore exception for SET_DYN_SRC_TRL_POOL: %s."
+            LOG.info(_LI("Ignore exception for SET_DYN_SRC_TRL_POOL: %s. "
                          "The config seems to be applied properly but netconf "
                          "seems to report an error."), dyn_nat_e)
 
@@ -546,7 +548,7 @@ class ASR1kRoutingDriver(iosxe_driver.IosXeRoutingDriver):
         is applied to the redundancy parameter for setting the IP NAT.
         """
         vlan = ex_gw_port['hosting_info']['segmentation_id']
-        hsrp_grp = ex_gw_port['ha_info']['group']
+        hsrp_grp = ex_gw_port[ha.HA_INFO]['group']
 
         LOG.debug("add floating_ip: %(fip)s, fixed_ip: %(fixed_ip)s, "
                   "vrf: %(vrf)s, ex_gw_port: %(port)s",
@@ -567,7 +569,7 @@ class ASR1kRoutingDriver(iosxe_driver.IosXeRoutingDriver):
     def _asr_do_remove_floating_ip(self, floating_ip,
                                    fixed_ip, vrf, ex_gw_port):
         vlan = ex_gw_port['hosting_info']['segmentation_id']
-        hsrp_grp = ex_gw_port['ha_info']['group']
+        hsrp_grp = ex_gw_port[ha.HA_INFO]['group']
 
         confstr = asr1k_snippets.REMOVE_STATIC_SRC_TRL_NO_VRF_MATCH % \
             (fixed_ip, floating_ip, vrf, hsrp_grp, vlan)
