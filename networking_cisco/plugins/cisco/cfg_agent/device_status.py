@@ -18,8 +18,12 @@ from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_utils import timeutils
 
+from networking_cisco.plugins.cisco.cfg_agent import cfg_exceptions
+import networking_cisco.plugins.cisco.common.cisco_constants as cc
 from neutron.agent.linux import utils as linux_utils
-from neutron.i18n import _LI, _LW
+from neutron.i18n import _LI
+from neutron.i18n import _LW
+
 import pprint
 
 
@@ -169,12 +173,12 @@ class DeviceStatus(object):
         if _is_pingable(hd_mgmt_ip):
             LOG.debug("Hosting device: %(hd_id)s@%(ip)s is reachable.",
                       {'hd_id': hd_id, 'ip': hd_mgmt_ip})
-            hd['hd_state'] = 'Active'
+            hd['hd_state'] = cc.HD_ACTIVE
             ret_val = True
         else:
             LOG.debug("Hosting device: %(hd_id)s@%(ip)s is NOT reachable.",
                       {'hd_id': hd_id, 'ip': hd_mgmt_ip})
-            hd['hd_state'] = 'Unknown'
+            hd['hd_state'] = cc.HD_NOT_RESPONDING
             ret_val = False
 
         if (self.enable_heartbeat is True or ret_val is False):
@@ -191,7 +195,7 @@ class DeviceStatus(object):
 
         return ret_val
 
-    def check_backlogged_hosting_devices(self):
+    def check_backlogged_hosting_devices(self, driver_mgr):
         """"Checks the status of backlogged hosting devices.
 
         Skips newly spun up instances during their booting time as specified
@@ -212,7 +216,7 @@ class DeviceStatus(object):
         last state
         Active       Device is reachable.   Device was       Dead device
                      No state change        temporarily      recovered.
-                     unreachable.     Trigger resync
+                                            unreachable.     Trigger resync
         Unknown      Device connectivity    Device           Not a valid
                      test failed.  Set      connectivity     state
                      backlog timestamp      test failed.     transition.
@@ -247,19 +251,24 @@ class DeviceStatus(object):
                                             'ip': hd['management_ip_address']})
             hd_state = hd['hd_state']
             if _is_pingable(hd['management_ip_address']):
-                if hd_state == 'Unknown':
+                if hd_state == cc.HD_NOT_RESPONDING:
                     LOG.debug("hosting devices revived & reachable, %s" %
                               (pprint.pformat(hd)))
-                    hd['hd_state'] = 'Active'
-                    response_dict['revived'].append(hd_id)
-                    # Rely just on full-sync to ensure consistent
+                    hd['hd_state'] = cc.HD_ACTIVE
                     # hosting device state
                     response_dict['reachable'].append(hd_id)
-                elif hd_state == 'Dead':
-                    LOG.debug("Dead hosting devices revived %s" %
+                elif hd_state == cc.HD_DEAD:
+                    # test if netconf is actually ready
+                    driver = driver_mgr.get_driver_for_hosting_device(hd_id)
+                    try:
+                        driver.send_empty_cfg()
+                        LOG.debug("Dead hosting devices revived %s" %
                               (pprint.pformat(hd)))
-                    hd['hd_state'] = 'Active'
-                    response_dict['revived'].append(hd_id)
+                        hd['hd_state'] = cc.HD_ACTIVE
+                        response_dict['revived'].append(hd_id)
+                    except cfg_exceptions.DriverException as e:
+                        LOG.debug("netconf not ready on device yet."
+                                  "Error is %(e)s", {'e': e})
                 else:
                     LOG.debug("No-op."
                               "_is_pingable is True and current"
@@ -274,18 +283,18 @@ class DeviceStatus(object):
                          {'hd_id': hd_id,
                           'hd_state': hd['hd_state'],
                           'ip': hd['management_ip_address']})
-                if hd_state == 'Active':
+                if hd_state == cc.HD_ACTIVE:
                     LOG.debug("hosting device lost connectivity, %s" %
                               (pprint.pformat(hd)))
                     hd['backlog_insertion_ts'] = timeutils.utcnow()
-                    hd['hd_state'] = 'Unknown'
+                    hd['hd_state'] = cc.HD_NOT_RESPONDING
 
-                elif hd_state == 'Unknown':
+                elif hd_state == cc.HD_NOT_RESPONDING:
                     if timeutils.is_older_than(
                             hd['backlog_insertion_ts'],
                             cfg.CONF.cfg_agent.hosting_device_dead_timeout):
                         # current hd_state is now dead, previous state: Unknown
-                        hd['hd_state'] = 'Dead'
+                        hd['hd_state'] = cc.HD_DEAD
                         LOG.debug("Hosting device: %(hd_id)s @ %(ip)s hasn't "
                                   "been reachable for the "
                                   "last %(time)d seconds. "
