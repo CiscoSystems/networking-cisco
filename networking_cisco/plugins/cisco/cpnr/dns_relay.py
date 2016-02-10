@@ -406,13 +406,13 @@ def main():
     except:
         LOG.error(_('Failed to increase ulimit for DNS relay'))
     if os.getuid() != 0:
-        config.setup_logging(cfg.CONF)
+        config.setup_logging()
         LOG.error(_('Must run dns relay as root'))
         return
     eventlet.monkey_patch()
     cfg.CONF.register_opts(OPTS, 'cisco_pnr')
     cfg.CONF(project='neutron')
-    config.setup_logging(cfg.CONF)
+    config.setup_logging()
     relay = DnsRelayAgent()
     relay.serve()
 

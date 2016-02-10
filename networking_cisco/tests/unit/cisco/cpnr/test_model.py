@@ -334,7 +334,7 @@ class TestModel(base.BaseTestCase):
         opt_list_pnr_format = [dhcpopts.format_for_pnr(opts_list[i].opt_name,
                                                        opts_list[i].opt_value)
                                for i in range(len(opts_list))]
-        expected = {'OptionItem': opts_list}
+        expected = {'OptionItem': opt_list_pnr_format}
         self.assertEquals(policy.data['optionList'], expected)
 
     def test_policy_from_subnet(self):
@@ -350,7 +350,9 @@ class TestModel(base.BaseTestCase):
                             ('dhcp-lease-time',
                              str(cfg.CONF.dhcp_lease_duration)),
                             ('domain-name', cfg.CONF.dhcp_domain)]
-        expected = {'OptionItem': fake_policy_opts}
+        policy_list_pnr_format = [dhcpopts.format_for_pnr(name, val)
+                                  for name, val in fake_policy_opts]
+        expected = {'OptionItem': policy_list_pnr_format}
         self.assertEquals(policy.data['optionList'], expected)
 
     def test_scope_from_subnet(self):
