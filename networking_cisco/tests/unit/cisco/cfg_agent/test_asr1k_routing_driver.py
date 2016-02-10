@@ -194,6 +194,7 @@ class ASR1kRoutingDriver(base.BaseTestCase):
                 group, group, vlan)
 
     def test_internal_network_added(self):
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self.driver.internal_network_added(self.ri, self.port)
 
         sub_interface = self.phy_infc + '.' + str(self.vlan_int)
@@ -234,6 +235,7 @@ class ASR1kRoutingDriver(base.BaseTestCase):
         cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
 
     def test_internal_network_added_global_router(self):
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self.driver.internal_network_added(self.ri_global, self.port)
         sub_interface = self.phy_infc + '.' + str(self.vlan_int)
         cfg_args_sub = (sub_interface, self.vlan_int,
@@ -254,10 +256,12 @@ class ASR1kRoutingDriver(base.BaseTestCase):
         del self.port[HA_INFO]
 
     def _make_test_router_redundancy_router(self):
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self.ri.router[ROUTER_ROLE_ATTR] = ROUTER_ROLE_HA_REDUNDANCY
         self.ex_gw_port['fixed_ips'][0]['ip_address'] = '20.0.0.33'
 
     def test_external_network_added_non_ha(self):
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self._make_test_router_non_ha()
         self.driver.external_gateway_added(self.ri, self.ex_gw_port)
 
@@ -288,6 +292,7 @@ class ASR1kRoutingDriver(base.BaseTestCase):
         cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
 
     def test_external_network_added_user_visible_router(self):
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self.driver.external_gateway_added(self.ri, self.ex_gw_port)
 
         sub_interface = self.phy_infc + '.' + str(self.vlan_ext)
@@ -298,6 +303,7 @@ class ASR1kRoutingDriver(base.BaseTestCase):
         self.assert_edit_run_cfg(snippets.CREATE_NAT_POOL, cfg_params_nat)
 
     def test_external_network_added_redundancy_router(self):
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self._make_test_router_redundancy_router()
         self.driver.external_gateway_added(self.ri, self.ex_gw_port)
 
@@ -328,6 +334,7 @@ class ASR1kRoutingDriver(base.BaseTestCase):
         cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
 
     def test_external_gateway_removed_non_ha(self):
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self._make_test_router_non_ha()
         self.driver.external_gateway_removed(self.ri, self.ex_gw_port)
 
@@ -342,6 +349,7 @@ class ASR1kRoutingDriver(base.BaseTestCase):
                                  cfg_params_remove_route)
 
     def test_external_gateway_removed_user_visible_router(self):
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self.driver.external_gateway_removed(self.ri, self.ex_gw_port)
 
         cfg_params_nat = (self.vrf + '_nat_pool', self.ex_gw_ip,
@@ -355,6 +363,7 @@ class ASR1kRoutingDriver(base.BaseTestCase):
                                  cfg_params_remove_route)
 
     def test_external_gateway_removed_redundancy_router(self):
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self._make_test_router_redundancy_router()
         self.driver.external_gateway_removed(self.ri, self.ex_gw_port)
 
@@ -369,6 +378,7 @@ class ASR1kRoutingDriver(base.BaseTestCase):
                                  cfg_params_remove_route)
 
     def test_external_gateway_removed(self):
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self.driver.external_gateway_removed(self.ri, self.ex_gw_port)
 
         cfg_params_nat = (self.vrf + '_nat_pool', self.ex_gw_ip,
@@ -402,6 +412,7 @@ class ASR1kRoutingDriver(base.BaseTestCase):
         cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
 
     def test_external_gateway_removed_global_router(self):
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self.driver._interface_exists = mock.MagicMock(return_value=True)
 
         self.driver.external_gateway_removed(self.ri_global, self.ex_gw_port)
@@ -411,6 +422,7 @@ class ASR1kRoutingDriver(base.BaseTestCase):
             csr_snippets.REMOVE_SUBINTERFACE, sub_interface)
 
     def test_floating_ip_added(self):
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self.driver.floating_ip_added(self.ri, self.ex_gw_port,
                                       self.floating_ip, self.fixed_ip)
 
@@ -437,6 +449,7 @@ class ASR1kRoutingDriver(base.BaseTestCase):
         cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
 
     def test_floating_ip_removed(self):
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self.driver.floating_ip_removed(self.ri, self.ex_gw_port,
                                         self.floating_ip, self.fixed_ip)
 
@@ -464,6 +477,7 @@ class ASR1kRoutingDriver(base.BaseTestCase):
         cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
 
     def test_driver_enable_internal_network_NAT(self):
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self.driver.enable_internal_network_NAT(self.ri,
                                                 self.port, self.ex_gw_port)
 
@@ -526,6 +540,7 @@ class ASR1kRoutingDriver(base.BaseTestCase):
         cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
 
     def test_driver_disable_internal_network_NAT(self):
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self.driver.disable_internal_network_NAT(self.ri,
                                                  self.port, self.ex_gw_port)
 
