@@ -36,6 +36,7 @@ from networking_cisco.plugins.cisco.common import (cisco_constants as
                                                    c_constants)
 from networking_cisco.plugins.cisco.extensions import ha
 from networking_cisco.plugins.cisco.extensions import routerrole
+from ncclient.transport import errors as ncc_errors
 
 LOG = logging.getLogger(__name__)
 
@@ -166,6 +167,7 @@ class RoutingServiceHelper(object):
         self.updated_routers = set()
         self.removed_routers = set()
         self.sync_devices = set()
+        self.sync_devices_attempts = 0
         self.fullsync = True
         self.topic = '%s.%s' % (c_constants.CFG_AGENT_L3_ROUTING, host)
 
