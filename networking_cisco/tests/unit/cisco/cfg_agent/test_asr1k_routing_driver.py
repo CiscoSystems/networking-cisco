@@ -531,8 +531,8 @@ class ASR1kRoutingDriver(base.BaseTestCase):
 
         self._assert_number_of_edit_run_cfg_calls(3)
 
-        acl_name = '%s_%s_%s' % ('neutron_acl', str(self.vlan_int),
-                                 self.port['id'][:8])
+        acl_name = '%s_%s_%s' % ('neutron_acl',
+                                 str(self.vlan_int), self.port['id'][:8])
         pool_name = "%s_nat_pool" % self.vrf
 
         cfg_params_dyn_trans = (acl_name, pool_name, self.vrf)
