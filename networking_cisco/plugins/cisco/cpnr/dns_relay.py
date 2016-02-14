@@ -26,9 +26,9 @@ from oslo_log import log as logging
 
 from neutron.common import config
 
-from networking_cisco._i18n import _, _LE, _LI, _LW
-from networking_cisco.plugins.cisco.cpnr import netns
+from networking_cisco._i18n import _, _LE, _LW
 from networking_cisco.plugins.cisco.cpnr import debug_stats
+from networking_cisco.plugins.cisco.cpnr import netns
 
 LOG = logging.getLogger(__name__)
 
@@ -126,7 +126,8 @@ class DnsRelayAgent(object):
             self.ext_sock, self.ext_addr, ext_port = \
                 self._open_dns_ext_socket()
         except Exception:
-            LOG.exception(_LE('Failed to open dns external socket in global ns'))
+            LOG.exception(_LE('Failed to open dns external '
+                              'socket in global ns'))
             return
         recvbuf = bytearray(RECV_BUFFER_SIZE)
         LOG.debug("Opened dns external server socket on addr:%s:%i",
@@ -140,13 +141,13 @@ class DnsRelayAgent(object):
                 msgid = pkt.get_msgid()
                 LOG.debug("got dns response pkt, msgid =  %i", msgid)
                 if msgid not in self.request_info_by_msgid:
-                    LOG.debug(_('Could not find request by msgid %i'), msgid)
+                    LOG.debug('Could not find request by msgid %i', msgid)
                     continue
                 int_sock, int_addr, int_port, createtime, viewid = \
                     self.request_info_by_msgid[msgid]
                 self.debug_stats.increment_pkts_from_server(viewid)
                 LOG.debug("forwarding response to internal namespace "
-                            "at %s:%i", int_addr, int_port)
+                          "at %s:%i", int_addr, int_port)
                 int_sock.sendto(recvbuf[:size], (int_addr, int_port))
                 del self.request_info_by_msgid[msgid]
                 self.debug_stats.increment_pkts_to_client(viewid)
@@ -310,7 +311,7 @@ class DnsPacket(object):
         pos += 8
 
         LOG.debug('Parsed pkt: msgid %s qdcnt %i ancnt %i nscnt %i '
-                   'arcnt %i', pkt.msgid, qdcnt, ancnt, nscnt, arcnt)
+                  'arcnt %i', pkt.msgid, qdcnt, ancnt, nscnt, arcnt)
 
         for i in range(qdcnt):
             pos = cls.skip_over_domain_name(buf, pos)

@@ -17,11 +17,11 @@
 # Cisco's CPNR (Cisco Prime Network Registrar) server
 #######################################################
 
+from neutron.common import exceptions
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
 import requests
 from requests import exceptions as r_exc
-from neutron.common import exceptions
 
 LOG = logging.getLogger(__name__)
 URL_BASE = "web-services/rest/resource"

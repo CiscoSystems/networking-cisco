@@ -12,20 +12,20 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from itertools import groupby
 import netaddr
 import time
-import uuid
-from itertools import groupby
 from operator import itemgetter
+import uuid
 
-from oslo_log import log as logging
 from oslo_config import cfg
+from oslo_log import log as logging
 
-from neutron.agent.linux import dhcp
-from neutron.common import constants
 from networking_cisco.plugins.cisco.cpnr import cpnr_client
 from networking_cisco.plugins.cisco.cpnr import dhcpopts
-from networking_cisco._i18n import _, _LE, _LI, _LW
+from networking_cisco._i18n import _LE, _LW
+from neutron.agent.linux import dhcp
+from neutron.common import constants
 
 LOG = logging.getLogger(__name__)
 RELOAD_TIMEOUT = 120
@@ -376,7 +376,7 @@ class Policy(object):
         if isolated_subnets[subnet.id] and \
            cfg.CONF.enable_isolated_metadata and \
            subnet.ip_version == 4:
-            class HostRoute:
+            class HostRoute(object):
                 pass
             for ip in cls._iter_dhcp_ips(network, subnet):
                 hr = HostRoute()
@@ -635,7 +635,8 @@ def recover_networks():
     try:
         networks = _unsafe_recover_networks()
     except Exception:
-        LOG.exception(_LE("Failed to recover networks. CPNR may be unreachable"))
+        LOG.exception(_LE("Failed to recover networks. "
+                          "CPNR may be unreachable"))
     return networks
 
 
@@ -678,7 +679,7 @@ def _unsafe_recover_networks():
                     net.hosts[host['name']] = Host.from_pnr(host, viewid)
             except Exception:
                 LOG.exception(_LE('Failed to read back PNR data for '
-                                'network %s view %s'), netid, viewid)
+                                  'network %s view %s'), netid, viewid)
     except Exception:
         LOG.exception(_LE('Failed to recover networks from PNR'))
     return networks

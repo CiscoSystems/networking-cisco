@@ -25,7 +25,7 @@ from oslo_log import log as logging
 
 from neutron.common import config
 
-from networking_cisco._i18n import _, _LE, _LI, _LW
+from networking_cisco._i18n import _LE, _LW
 from networking_cisco.plugins.cisco.cpnr import debug_stats
 from networking_cisco.plugins.cisco.cpnr import netns
 
@@ -167,7 +167,7 @@ class DhcpRelayAgent(object):
         self.debug_stats.add_network_stats(vpnid)
         self.int_sockets_by_vpn[vpnid] = send_sock
         recvbuf = bytearray(RECV_BUFFER_SIZE)
-        LOG.debug(_LE('Opened dhcp server socket on ns:%s, addr:%s, vpn:%s'),
+        LOG.debug('Opened dhcp server socket on ns:%s, addr:%s, vpn:%s',
                   namespace, int_addr, vpnid)
 
         # Forward DHCP requests from internal to external networks
@@ -183,7 +183,7 @@ class DhcpRelayAgent(object):
                     pkt.set_relay_option(*option)
                 pkt.set_giaddr(self.ext_addr)
                 self.debug_stats.increment_pkts_from_client(vpnid)
-                LOG.debug(_('Forwarding DHCP request for vpn %s'), vpnid)
+                LOG.debug('Forwarding DHCP request for vpn %s', vpnid)
                 self.ext_sock.send(pkt.data())
                 self.debug_stats.increment_pkts_to_server(vpnid)
             except Exception:

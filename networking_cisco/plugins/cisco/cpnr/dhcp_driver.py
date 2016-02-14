@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 # All Rights Reserved.
 #
@@ -21,13 +19,13 @@ import os
 import shutil
 import time
 
-from oslo_log import log as logging
-from oslo_config import cfg
+from networking_cisco.plugins.cisco.cpnr import model
+from networking_cisco._i18n import _, _LE, _LW
 from neutron.agent.linux import dhcp
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
-from networking_cisco.plugins.cisco.cpnr import model
-from networking_cisco._i18n import _, _LE, _LI, _LW
+from oslo_config import cfg
+from oslo_log import log as logging
 
 LOG = logging.getLogger(__name__)
 GREENPOOL_SIZE = 10
@@ -240,8 +238,8 @@ class SimpleCpnrDriver(RemoteServerDriver):
         ver = model.get_version()
         if ver < cls.MIN_VERSION:
             LOG.warn(_LW("CPNR version does not meet minimum requirements, "
-                       "expected: %f, actual: %f"),
-                     cls.MIN_VERSION, ver)
+                         "expected: %f, actual: %f"),
+                          cls.MIN_VERSION, ver)
         return ver
 
     @classmethod
@@ -318,7 +316,7 @@ class CpnrDriver(SimpleCpnrDriver):
                                      eventlet.semaphore.Semaphore())
             with lock:
                 self._unsafe_update_server(disabled)
-        except Exception as e:
+        except Exception:
             LOG.exception(_LE('Failed to update PNR for network: %s'),
                           self.network.id)
 
@@ -328,7 +326,7 @@ class CpnrDriver(SimpleCpnrDriver):
                                      eventlet.semaphore.Semaphore())
             with lock:
                 self._unsafe_update_device(disabled)
-        except Exception as e:
+        except Exception:
             LOG.exception(_LE("Failed to update device for network: %s"),
                           self.network.id)
 
@@ -392,7 +390,7 @@ class CpnrDriver(SimpleCpnrDriver):
                                              eventlet.semaphore.Semaphore())
                     with lock:
                         created.create()
-                except Exception as e:
+                except Exception:
                     LOG.exception(_LE('Failed to create network %s in CPNR '
                                     'during sync'), key)
 
@@ -405,6 +403,6 @@ class CpnrDriver(SimpleCpnrDriver):
                                              eventlet.semaphore.Semaphore())
                     with lock:
                         pnr_networks[key].update(updated)
-                except Exception as e:
+                except Exception:
                     LOG.exception(_LE('Failed to update network %s in CPNR '
                                     'during sync'), key)
