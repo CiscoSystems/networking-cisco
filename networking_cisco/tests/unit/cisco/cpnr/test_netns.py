@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-#
 # Copyright 2015 Cisco Systems, Inc.  All rights reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -15,10 +13,11 @@
 #    under the License.
 #
 
-from netns import Namespace, nslist, iflist, os, subprocess
-import sys
 import mock
 import unittest
+
+from netns import iflist
+from netns import nslist
 
 
 class TestNetNs(unittest.TestCase):
@@ -63,7 +62,7 @@ class TestNetNs(unittest.TestCase):
         self.assertEqual(name, 'eth0')
         self.assertEqual(addr, '10.1.1.1')
         self.assertEqual(mask, '24')
-        with self.assertRaises(IndexError) as context:
+        with self.assertRaises(IndexError):
             name, addr, mask = interfaces[1]
 
         interfaces = iflist(ignore=("eth0",))
@@ -71,11 +70,11 @@ class TestNetNs(unittest.TestCase):
         self.assertEqual(name, 'lo')
         self.assertEqual(addr, '127.0.0.1')
         self.assertEqual(mask, '8')
-        with self.assertRaises(IndexError) as context:
+        with self.assertRaises(IndexError):
             name, addr, mask = interfaces[1]
 
         # test with no input
         mock_check_output.return_value = ''
         interfaces = iflist()
-        with self.assertRaises(IndexError) as context:
+        with self.assertRaises(IndexError):
             name, addr, mask = interfaces[0]

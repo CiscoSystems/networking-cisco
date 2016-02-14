@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-#
 # Copyright 2015 Cisco Systems, Inc.  All rights reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -15,12 +13,16 @@
 #    under the License.
 #
 
-from dhcp_relay import DhcpRelayAgent, DhcpPacket, cfg, OPTS
-import mock
-import unittest
-import socket
 from binascii import hexlify
+import mock
+import socket
 
+from dhcp_relay import cfg
+from dhcp_relay import DhcpPacket
+from dhcp_relay import DhcpRelayAgent
+from dhcp_relay import OPTS
+
+import unittest
 
 class TestDhcpRelayAgent(unittest.TestCase):
 
@@ -55,12 +57,12 @@ class TestDhcpRelayAgent(unittest.TestCase):
         )
 
         # check exception thrown if no interfaces
-        with self.assertRaises(Exception) as context:
+        with self.assertRaises(Exception):
             mock_netns.iflist.return_value = []
             sock, addr = relay._open_dhcp_ext_socket()
 
         # check exception thrown if no matching interfaces
-        with self.assertRaises(Exception) as context:
+        with self.assertRaises(Exception):
             mock_netns.iflist.return_value = []
             mock_netns.iflist.return_value.append(('eth1', '10.0.1.3',
                                                    '255.255.255.0'))
@@ -98,7 +100,7 @@ class TestDhcpRelayAgent(unittest.TestCase):
         )
 
         # check exception thrown if no interfaces
-        with self.assertRaises(Exception) as context:
+        with self.assertRaises(Exception):
             mock_netns.iflist.return_value = []
             recv_s, send_s, addr = relay._open_dhcp_int_socket()
 
@@ -135,7 +137,7 @@ class TestDhcpPacket(unittest.TestCase):
             self.assertEqual(actual_packet_options, expected_relay_options)
 
             # Unsuccessful case of undefined relay agent sub-options
-            with self.assertRaises(KeyError) as context:
+            with self.assertRaises(KeyError):
                 value = packet.get_relay_option(220)
 
     def test_data(self):

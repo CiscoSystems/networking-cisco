@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-#
 # Copyright 2015 Cisco Systems, Inc.  All rights reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -15,12 +13,15 @@
 #    under the License.
 #
 
-from dns_relay import DnsRelayAgent, DnsPacket, cfg, OPTS
-import sys
-import mock
-import unittest
-import socket
 from binascii import hexlify
+import mock
+import socket
+import unittest
+
+from dns_relay import cfg
+from dns_relay import DnsPacket
+from dns_relay import DnsRelayAgent
+from dns_relay import OPTS
 
 
 class TestDnsRelayAgent(unittest.TestCase):
@@ -61,12 +62,12 @@ class TestDnsRelayAgent(unittest.TestCase):
         )
 
         # check exception thrown if no interfaces
-        with self.assertRaises(Exception) as context:
+        with self.assertRaises(Exception):
             mock_netns.iflist.return_value = []
             sock, addr, port = relay._open_dns_ext_socket()
 
         # check exception thrown if no matching interfaces
-        with self.assertRaises(Exception) as context:
+        with self.assertRaises(Exception):
             mock_netns.iflist.return_value = []
             mock_netns.iflist.return_value.append(('eth0', '10.0.0.10',
                                                    '255.255.255.0'))
@@ -101,7 +102,7 @@ class TestDnsRelayAgent(unittest.TestCase):
         )
 
         # check exception thrown if no interfaces
-        with self.assertRaises(Exception) as context:
+        with self.assertRaises(Exception):
             mock_netns.iflist.return_value = []
             sock, addr, port = relay._open_dns_int_socket()
 
