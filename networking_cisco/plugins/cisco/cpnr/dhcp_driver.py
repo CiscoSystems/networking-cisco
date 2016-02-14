@@ -21,16 +21,13 @@ import os
 import shutil
 import time
 
-from oslo_config import cfg
-from oslo_utils import encodeutils
-from oslo_utils import importutils
-from oslo_utils import timeutils
 from oslo_log import log as logging
+from oslo_config import cfg
 from neutron.agent.linux import dhcp
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
-from neutron.plugins.cisco.cpnr import model
-from neutron.plugins.cisco.cpnr import netns
+from networking_cisco.plugins.cisco.cpnr import model
+from networking_cisco._i18n import _, _LE, _LI, _LW
 
 LOG = logging.getLogger(__name__)
 GREENPOOL_SIZE = 10
@@ -168,26 +165,25 @@ class RemoteServerDriver(dhcp.DhcpBase):
                     ifname = f.read()
                 _devices[netid] = ifname
             except IOError:
-                LOG.error(_('Unable to read interface file: %s'),
+                LOG.error(_LE('Unable to read interface file: %s'),
                           intf_filename)
-            LOG.debug(_('Recovered device %s for network %s'),
+            LOG.debug("Recovered device %s for network %s'",
                       ifname, netid)
 
     def update_device(self, disabled=False):
         try:
             self._unsafe_update_device(disabled)
         except Exception:
-            LOG.exception(_("Failed to update device for network: %s"),
+            LOG.exception(_LE("Failed to update device for network: %s"),
                           self.network.id)
 
     def _unsafe_update_device(self, disabled=False):
         if self.network.id not in _devices:
             if disabled:
                 return
-            LOG.debug(_("Setting up device for network: %s"),
+            LOG.debug("Setting up device for network: %s",
                       self.network.id)
-            ifname = self.device_manager.setup(self.network,
-                                               reuse_existing=True)
+            ifname = self.device_manager.setup(self.network)
             _devices[self.network.id] = ifname
             self._write_intf_file()
         elif disabled:
@@ -200,7 +196,7 @@ class RemoteServerDriver(dhcp.DhcpBase):
             try:
                 self.device_manager.update(self.network, ifname)
             except Exception:
-                LOG.error(_("Failed to update device for network: %s"),
+                LOG.error(_LE("Failed to update device for network: %s"),
                           self.network.id)
                 del _devices[self.network.id]
                 self._unsafe_update_device()
@@ -243,7 +239,7 @@ class SimpleCpnrDriver(RemoteServerDriver):
         cls.recover_networks()
         ver = model.get_version()
         if ver < cls.MIN_VERSION:
-            LOG.warn(_("CPNR version does not meet minimum requirements, "
+            LOG.warn(_LW("CPNR version does not meet minimum requirements, "
                        "expected: %f, actual: %f"),
                      cls.MIN_VERSION, ver)
         return ver
@@ -271,7 +267,7 @@ class SimpleCpnrDriver(RemoteServerDriver):
             self._unsafe_update_server(disabled)
             model.reload_server()
         except Exception:
-            LOG.exception(_("Failed to update PNR for network: %s"),
+            LOG.exception(_LE("Failed to update PNR for network: %s"),
                           self.network.id)
 
     def _unsafe_update_server(self, disabled=False):
@@ -323,7 +319,7 @@ class CpnrDriver(SimpleCpnrDriver):
             with lock:
                 self._unsafe_update_server(disabled)
         except Exception as e:
-            LOG.exception(_('Failed to update PNR for network: %s'),
+            LOG.exception(_LE('Failed to update PNR for network: %s'),
                           self.network.id)
 
     def update_device(self, disabled=False):
@@ -333,7 +329,7 @@ class CpnrDriver(SimpleCpnrDriver):
             with lock:
                 self._unsafe_update_device(disabled)
         except Exception as e:
-            LOG.exception(_("Failed to update device for network: %s"),
+            LOG.exception(_LE("Failed to update device for network: %s"),
                           self.network.id)
 
     @classmethod
@@ -384,7 +380,7 @@ class CpnrDriver(SimpleCpnrDriver):
                     with lock:
                         deleted.delete()
                 except Exception as e:
-                    LOG.exception(_('Failed to delete network %s in CPNR '
+                    LOG.exception(_LE('Failed to delete network %s in CPNR '
                                     'during sync:'), key)
 
             # Create VPNs in CPNR if not already present
@@ -397,7 +393,7 @@ class CpnrDriver(SimpleCpnrDriver):
                     with lock:
                         created.create()
                 except Exception as e:
-                    LOG.exception(_('Failed to create network %s in CPNR '
+                    LOG.exception(_LE('Failed to create network %s in CPNR '
                                     'during sync'), key)
 
             # Update VPNs in CPNR if normal update has been unsuccessful
@@ -410,5 +406,5 @@ class CpnrDriver(SimpleCpnrDriver):
                     with lock:
                         pnr_networks[key].update(updated)
                 except Exception as e:
-                    LOG.exception(_('Failed to update network %s in CPNR '
+                    LOG.exception(_LE('Failed to update network %s in CPNR '
                                     'during sync'), key)

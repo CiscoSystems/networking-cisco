@@ -15,14 +15,16 @@
 import binascii
 
 from oslo_log import log as logging
+from networking_cisco._i18n import _, _LE, _LI, _LW
 
 LOG = logging.getLogger(__name__)
+
 
 def format_for_pnr(name, value):
     name = name.strip()
     value = value.strip()
     if name not in OPTIONS:
-        LOG.warn(_("Unrecognized DHCP options: %s"), name)
+        LOG.warn(_LW("Unrecognized DHCP options: %s"), name)
         return None
     code, datatype = OPTIONS[name]
     return {'number': str(code), 'value': value}
@@ -45,7 +47,7 @@ def _format_value(datatype, value):
         else:
             return '00'
     elif datatype.startswith('int'):
-        length = int(datatype[3:])/4
+        length = int(datatype[3:]) / 4
         return '{:0{}x}'.format(int(value), length)
     elif datatype == 'string':
         return binascii.hexlify(value)

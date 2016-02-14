@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-#
 # Copyright 2015 Cisco Systems, Inc.  All rights reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -14,22 +12,23 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-# @author: Anne McCormick, Cisco Systems, Inc.
 
 
-import socket
+import eventlet
 import os
+import socket
 import struct
 import time
 import uuid
 
-import eventlet
 from oslo_config import cfg
 from oslo_log import log as logging
 
 from neutron.common import config
-from neutron.plugins.cisco.cpnr import netns
-from neutron.plugins.cisco.cpnr import debug_stats
+
+from networking_cisco._i18n import _, _LE, _LI, _LW
+from networking_cisco.plugins.cisco.cpnr import netns
+from networking_cisco.plugins.cisco.cpnr import debug_stats
 
 LOG = logging.getLogger(__name__)
 
@@ -104,7 +103,7 @@ class DnsRelayAgent(object):
             try:
                 curr_ns = set(netns.nslist())
             except Exception:
-                LOG.error(_('Failed to get current namespace set'))
+                LOG.error(_LE('Failed to get current namespace set'))
                 continue
 
             # For each unknown namespace, start a relay thread
@@ -127,10 +126,10 @@ class DnsRelayAgent(object):
             self.ext_sock, self.ext_addr, ext_port = \
                 self._open_dns_ext_socket()
         except Exception:
-            LOG.exception(_('Failed to open dns external socket in global ns'))
+            LOG.exception(_LE('Failed to open dns external socket in global ns'))
             return
         recvbuf = bytearray(RECV_BUFFER_SIZE)
-        LOG.debug(_('Opened dns external server socket on addr:%s:%i'),
+        LOG.debug("Opened dns external server socket on addr:%s:%i",
                   self.ext_addr, ext_port)
 
         # Forward DNS responses from external to internal networks
@@ -139,20 +138,20 @@ class DnsRelayAgent(object):
                 size = self.ext_sock.recv_into(recvbuf)
                 pkt = DnsPacket.parse(recvbuf, size)
                 msgid = pkt.get_msgid()
-                LOG.debug(_('got dns response pkt, msgid =  %i'), msgid)
+                LOG.debug("got dns response pkt, msgid =  %i", msgid)
                 if msgid not in self.request_info_by_msgid:
                     LOG.debug(_('Could not find request by msgid %i'), msgid)
                     continue
                 int_sock, int_addr, int_port, createtime, viewid = \
                     self.request_info_by_msgid[msgid]
                 self.debug_stats.increment_pkts_from_server(viewid)
-                LOG.debug(_('forwarding response to internal namespace '
-                            'at %s:%i'), int_addr, int_port)
+                LOG.debug("forwarding response to internal namespace "
+                            "at %s:%i", int_addr, int_port)
                 int_sock.sendto(recvbuf[:size], (int_addr, int_port))
                 del self.request_info_by_msgid[msgid]
                 self.debug_stats.increment_pkts_to_client(viewid)
             except Exception:
-                LOG.exception(_('Failed to forward dns response'))
+                LOG.exception(_LE('Failed to forward dns response'))
 
     def _client_network_relay(self, namespace):
 
@@ -161,13 +160,13 @@ class DnsRelayAgent(object):
             with self.ns_lock as lock, netns.Namespace(namespace):
                 int_sock, int_addr, int_port = self._open_dns_int_socket()
         except Exception:
-            LOG.exception(_('Failed to open dns server socket in %s'),
+            LOG.exception(_LE('Failed to open dns server socket in %s'),
                           namespace)
             del self.ns_states[namespace]
             return
         self.ns_states[namespace] = NS_RELAY_RUNNING
         recvbuf = bytearray(RECV_BUFFER_SIZE)
-        LOG.debug(_('Opened dns server socket on ns: %s, addr:%s:%i'),
+        LOG.debug("Opened dns server socket on ns: %s, addr:%s:%i",
                   namespace, int_addr, int_port)
 
         # Convert the namespace into a view id
@@ -179,7 +178,7 @@ class DnsRelayAgent(object):
         while self.ns_states[namespace] != NS_RELAY_DELETING:
             try:
                 size, (src_addr, src_port) = int_sock.recvfrom_into(recvbuf)
-                LOG.debug(_('got dns request from ns: %s'), namespace)
+                LOG.debug("got dns request from ns: %s", namespace)
                 self.debug_stats.increment_pkts_from_client(viewid)
                 pkt = DnsPacket.parse(recvbuf, size)
                 pkt.set_viewid(viewid)
@@ -189,11 +188,11 @@ class DnsRelayAgent(object):
                 createtime = time.time()
                 self.request_info_by_msgid[msgid] = \
                     [int_sock, src_addr, src_port, createtime, viewid]
-                LOG.debug(_('forwarding request to external nameserver'))
+                LOG.debug("forwarding request to external nameserver")
                 self.ext_sock.send(pkt.data())
                 self.debug_stats.increment_pkts_to_server(viewid)
             except Exception:
-                LOG.exception(_('Failed to forward dns request to server '
+                LOG.exception(_LE('Failed to forward dns request to server '
                                 'from %s'), namespace)
 
         # Cleanup socket and internal state
@@ -202,7 +201,7 @@ class DnsRelayAgent(object):
             self.debug_stats.del_network_stats(viewid)
             int_sock.close()
         except Exception:
-            LOG.warning(_('Failed to cleanup dns relay for %s'), namespace)
+            LOG.warning(_LW('Failed to cleanup dns relay for %s'), namespace)
 
     def _open_dns_ext_socket(self):
 
@@ -262,7 +261,7 @@ class DnsRelayAgent(object):
             self.debug_stats.write_stats_to_file()
 
 
-class DnsPacket:
+class DnsPacket(object):
 
     # Byte array representation of common TXT RR fields that will be inserted
     # in each request
@@ -297,10 +296,10 @@ class DnsPacket:
         isquery = not (info & 0x80)
         if not isquery:
             pkt.buf = buf
-            LOG.debug(_('DNS packet is a response'))
+            LOG.debug("DNS packet is a response")
             return pkt
 
-        LOG.debug(_('DNS packet is a query'))
+        LOG.debug("DNS packet is a query")
         pkt.isreq = True
 
         (qdcnt,) = cls.struct('!H').unpack_from(buf, 4)
@@ -310,8 +309,8 @@ class DnsPacket:
         pkt.arcnt = arcnt
         pos += 8
 
-        LOG.debug(_('Parsed pkt: msgid %s qdcnt %i ancnt %i nscnt %i '
-                    'arcnt %i'), pkt.msgid, qdcnt, ancnt, nscnt, arcnt)
+        LOG.debug('Parsed pkt: msgid %s qdcnt %i ancnt %i nscnt %i '
+                   'arcnt %i', pkt.msgid, qdcnt, ancnt, nscnt, arcnt)
 
         for i in range(qdcnt):
             pos = cls.skip_over_domain_name(buf, pos)
@@ -319,7 +318,7 @@ class DnsPacket:
 
         if ancnt != 0 or nscnt != 0:
             # unexpected, log and return packet
-            LOG.debug(_('Unexpected answers in query, ancnt %i nscnt %i'),
+            LOG.debug('Unexpected answers in query, ancnt %i nscnt %i',
                       ancnt, nscnt)
             pkt.buf = buf
             return pkt
@@ -361,12 +360,12 @@ class DnsPacket:
 
         # insert TXT RR and data into buf
         pos = self.txt_insert_pos
-        self.buf[pos:pos+len(DnsPacket.TXT_RR)] = DnsPacket.TXT_RR
+        self.buf[pos:pos + len(DnsPacket.TXT_RR)] = DnsPacket.TXT_RR
         pos += len(DnsPacket.TXT_RR)
         txt_str = 'view: %s' % (self.viewid,)
         self.struct('!HB%is' %
                     (len(txt_str),)).pack_into(self.buf, pos,
-                                               len(txt_str)+1,
+                                               len(txt_str) + 1,
                                                len(txt_str), txt_str)
         pos += 3 + len(txt_str)
 
@@ -376,7 +375,7 @@ class DnsPacket:
 
         # copy OPT RR back in at end if presesnt
         if opt_data:
-            self.buf[pos:pos+len(opt_data)] = opt_data
+            self.buf[pos:pos + len(opt_data)] = opt_data
             pos += len(opt_data)
 
         return self.buf[:pos]
@@ -403,11 +402,11 @@ class DnsPacket:
 def main():
     try:
         netns.increase_ulimit(RLIMIT_NOFILE_LIMIT)
-    except:
-        LOG.error(_('Failed to increase ulimit for DNS relay'))
+    except Exception:
+        LOG.error(_LE('Failed to increase ulimit for DNS relay'))
     if os.getuid() != 0:
         config.setup_logging()
-        LOG.error(_('Must run dns relay as root'))
+        LOG.error(_LE('Must run dns relay as root'))
         return
     eventlet.monkey_patch()
     cfg.CONF.register_opts(OPTS, 'cisco_pnr')
