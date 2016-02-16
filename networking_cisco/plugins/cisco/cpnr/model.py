@@ -14,8 +14,8 @@
 
 from itertools import groupby
 import netaddr
-import time
 from operator import itemgetter
+import time
 import uuid
 
 from oslo_config import cfg
@@ -130,8 +130,8 @@ class Network(object):
 
 class Vpn(object):
 
-    def __init__(self, data={}):
-        self.data = data
+    def __init__(self, data=None):
+        self.data = data or {}
 
     @classmethod
     def from_neutron(cls, network):
@@ -177,8 +177,8 @@ class Vpn(object):
 
 class Scope(object):
 
-    def __init__(self, data={}):
-        self.data = data
+    def __init__(self, data=None):
+        self.data = data or {}
 
     @classmethod
     def from_neutron(cls, network, subnet):
@@ -252,8 +252,8 @@ class Scope(object):
 
 class ClientEntry(object):
 
-    def __init__(self, data={}, vpnid='0'):
-        self.data = data
+    def __init__(self, data=None, vpnid='0'):
+        self.data = data or {}
         self.vpnid = vpnid
 
     @classmethod
@@ -316,8 +316,8 @@ class ClientEntry(object):
 
 class Policy(object):
 
-    def __init__(self, data={}):
-        self.data = data
+    def __init__(self, data=None):
+        self.data = data or {}
 
     @classmethod
     def from_neutron_subnet(cls, network, subnet):
@@ -406,8 +406,8 @@ class Policy(object):
 
 class View(object):
 
-    def __init__(self, data={}):
-        self.data = data
+    def __init__(self, data=None):
+        self.data = data or {}
 
     @classmethod
     def from_neutron(cls, network):
@@ -445,8 +445,8 @@ class View(object):
 
 class ForwardZone(object):
 
-    def __init__(self, data={}):
-        self.data = data
+    def __init__(self, data=None):
+        self.data = data or {}
 
     @classmethod
     def from_neutron(cls, network):
@@ -493,8 +493,8 @@ class ForwardZone(object):
 
 class ReverseZone(object):
 
-    def __init__(self, data={}):
-        self.data = data
+    def __init__(self, data=None):
+        self.data = data or {}
 
     @classmethod
     def from_neutron(cls, network, subnet):
@@ -538,8 +538,8 @@ class ReverseZone(object):
 
 class Host(object):
 
-    def __init__(self, data={}, viewid=0):
-        self.data = data
+    def __init__(self, data=None, viewid=0):
+        self.data = data or {}
         self.viewid = viewid
 
     @classmethod
@@ -679,7 +679,8 @@ def _unsafe_recover_networks():
                     net.hosts[host['name']] = Host.from_pnr(host, viewid)
             except Exception:
                 LOG.exception(_LE('Failed to read back PNR data for '
-                                  'network %s view %s'), netid, viewid)
+                              'network %(network)s view %(view)s'),
+                              {'network': netid, 'view': viewid})
     except Exception:
         LOG.exception(_LE('Failed to recover networks from PNR'))
     return networks

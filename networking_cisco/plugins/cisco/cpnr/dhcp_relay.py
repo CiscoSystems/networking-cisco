@@ -151,7 +151,7 @@ class DhcpRelayAgent(object):
 
         # Open a socket in the DHCP network namespace
         try:
-            with self.ns_lock as lock, netns.Namespace(namespace) as ns:
+            with self.ns_lock, netns.Namespace(namespace):
                 recv_sock, send_sock, int_addr = self._open_dhcp_int_socket()
         except Exception:
             self.int_sock_retries += 1

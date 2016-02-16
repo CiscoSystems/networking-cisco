@@ -142,6 +142,7 @@ class RemoteServerDriver(dhcp.DhcpBase):
     @classmethod
     def existing_dhcp_networks(cls, conf):
         """Return a list of existing networks ids that we have configs for."""
+        global _devices
         return _devices.keys()
 
     @classmethod
@@ -150,8 +151,10 @@ class RemoteServerDriver(dhcp.DhcpBase):
         Creates global dict to track device names across driver invocations
         and populates based on current devices configured on the system.
         """
+
         if "_devices" in globals():
             return
+
         global _devices
         _devices = {}
         confs_dir = os.path.abspath(os.path.normpath(cfg.CONF.dhcp_confs))
@@ -176,6 +179,7 @@ class RemoteServerDriver(dhcp.DhcpBase):
                           self.network.id)
 
     def _unsafe_update_device(self, disabled=False):
+        global _devices
         if self.network.id not in _devices:
             if disabled:
                 return
@@ -200,6 +204,7 @@ class RemoteServerDriver(dhcp.DhcpBase):
                 self._unsafe_update_device()
 
     def _write_intf_file(self):
+        global _devices
         confs_dir = os.path.abspath(os.path.normpath(self.conf.dhcp_confs))
         conf_dir = os.path.join(confs_dir, self.network.id)
         if not os.path.isdir(conf_dir):
@@ -219,6 +224,18 @@ class RemoteServerDriver(dhcp.DhcpBase):
     def update_server(self, disabled=False):
         pass
 
+    @classmethod
+    def recover_networks(cls):
+        """
+        Creates global dict to track network objects across driver
+        invocations and populates using the model module.
+        """
+
+        if "_networks" in globals():
+            return
+
+        global _networks
+        _networks = model.recover_networks()
 
 class SimpleCpnrDriver(RemoteServerDriver):
 
@@ -238,27 +255,17 @@ class SimpleCpnrDriver(RemoteServerDriver):
         ver = model.get_version()
         if ver < cls.MIN_VERSION:
             LOG.warn(_LW("CPNR version does not meet minimum requirements, "
-                         "expected: %f, actual: %f"),
-                          cls.MIN_VERSION, ver)
+                     "expected: %(ever)f, actual: %(rver)f"),
+                     {'ever': cls.MIN_VERSION, 'rver': ver})
         return ver
 
     @classmethod
     def existing_dhcp_networks(cls, conf):
         """Return a list of existing networks ids that we have configs for."""
+        global _networks
         sup = super(SimpleCpnrDriver, cls)
         superkeys = sup.existing_dhcp_networks(conf)
         return set(_networks.keys()) & set(superkeys)
-
-    @classmethod
-    def recover_networks(cls):
-        """
-        Creates global dict to track network objects across driver
-        invocations and populates using the model module.
-        """
-        if "_networks" in globals():
-            return
-        global _networks
-        _networks = model.recover_networks()
 
     def update_server(self, disabled=False):
         try:
@@ -286,6 +293,10 @@ class SimpleCpnrDriver(RemoteServerDriver):
 
 
 class CpnrDriver(SimpleCpnrDriver):
+
+    # _queue = eventlet.queue.LightQueue()
+    # _locks = {}
+    # last_activity = time.time()
 
     def __init__(self, conf, network, root_helper='sudo',
                  version=None, plugin=None):
@@ -365,11 +376,13 @@ class CpnrDriver(SimpleCpnrDriver):
         global last_activity
         while True:
             eventlet.sleep(cfg.CONF.cisco_pnr.sync_interval)
-            if time.time() - last_activity < cfg.CONF.cisco_pnr.sync_interval:
-                continue
+            if ((time.time() - last_activity) <
+               cfg.CONF.cisco_pnr.sync_interval):
+                    continue
             pnr_networks = model.recover_networks()
             # Delete stale VPNs in CPNR
-            deleted_keys = set(pnr_networks.keys()) - set(_networks.keys())
+            deleted_keys = set(pnr_networks.keys()) - set(
+                               _networks.keys())
             for key in deleted_keys:
                 deleted = pnr_networks[key]
                 try:
@@ -377,12 +390,13 @@ class CpnrDriver(SimpleCpnrDriver):
                                              eventlet.semaphore.Semaphore())
                     with lock:
                         deleted.delete()
-                except Exception as e:
+                except Exception:
                     LOG.exception(_LE('Failed to delete network %s in CPNR '
                                     'during sync:'), key)
 
             # Create VPNs in CPNR if not already present
-            created_keys = set(_networks.keys()) - set(pnr_networks.keys())
+            created_keys = set(_networks.keys()) - set(
+                               pnr_networks.keys())
             for key in created_keys:
                 created = _networks[key]
                 try:
@@ -395,7 +409,8 @@ class CpnrDriver(SimpleCpnrDriver):
                                     'during sync'), key)
 
             # Update VPNs in CPNR if normal update has been unsuccessful
-            updated_keys = set(_networks.keys()) & set(pnr_networks.keys())
+            updated_keys = set(_networks.keys()) & set(
+                               pnr_networks.keys())
             for key in updated_keys:
                 updated = _networks[key]
                 try:

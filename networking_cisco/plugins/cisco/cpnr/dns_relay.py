@@ -158,7 +158,7 @@ class DnsRelayAgent(object):
 
         # Open a socket in the DNS network namespace
         try:
-            with self.ns_lock as lock, netns.Namespace(namespace):
+            with self.ns_lock, netns.Namespace(namespace):
                 int_sock, int_addr, int_port = self._open_dns_int_socket()
         except Exception:
             LOG.exception(_LE('Failed to open dns server socket in %s'),
