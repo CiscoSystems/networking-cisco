@@ -22,7 +22,7 @@ from oslo_config import cfg
 from networking_cisco.plugins.cisco.cpnr import cpnr_client
 from networking_cisco.plugins.cisco.cpnr import dhcpopts
 from networking_cisco.plugins.cisco.cpnr import model
-from networking_cisco.plugins.cisco.cpnr.tests.unit import fake_networks
+from networking_cisco.tests.unit.cisco.cpnr import fake_networks
 
 dhcp_agent.register_options(cfg.CONF)
 

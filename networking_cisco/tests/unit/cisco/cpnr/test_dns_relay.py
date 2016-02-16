@@ -18,10 +18,12 @@ import mock
 import socket
 import unittest
 
-from dns_relay import cfg
-from dns_relay import DnsPacket
-from dns_relay import DnsRelayAgent
-from dns_relay import OPTS
+from networking_cisco.plugins.cisco.cpnr.dns_relay import cfg
+from networking_cisco.plugins.cisco.cpnr.dns_relay import DnsPacket
+from networking_cisco.plugins.cisco.cpnr.dns_relay import DnsRelayAgent
+from networking_cisco.plugins.cisco.cpnr.dns_relay import OPTS
+
+from networking_cisco.plugins.cisco.cpnr.cpnr_client import UnexpectedError
 
 
 class TestDnsRelayAgent(unittest.TestCase):
@@ -38,7 +40,7 @@ class TestDnsRelayAgent(unittest.TestCase):
     def test_client_network_relay(self):
         pass
 
-    @mock.patch('dns_relay.netns')
+    @mock.patch('networking_cisco.plugins.cisco.cpnr.dns_relay.netns')
     @mock.patch('socket.socket')
     def test_open_dns_ext_socket(self,
                                  mock_socket,
@@ -62,12 +64,12 @@ class TestDnsRelayAgent(unittest.TestCase):
         )
 
         # check exception thrown if no interfaces
-        with self.assertRaises(Exception):
+        with self.assertRaises(UnexpectedError):
             mock_netns.iflist.return_value = []
             sock, addr, port = relay._open_dns_ext_socket()
 
         # check exception thrown if no matching interfaces
-        with self.assertRaises(Exception):
+        with self.assertRaises(UnexpectedError):
             mock_netns.iflist.return_value = []
             mock_netns.iflist.return_value.append(('eth0', '10.0.0.10',
                                                    '255.255.255.0'))
@@ -80,7 +82,7 @@ class TestDnsRelayAgent(unittest.TestCase):
         mock_netns.iflist.return_value.append(('lo', '127.0.0.1', '255.0.0.0'))
         sock, addr, port = relay._open_dns_ext_socket()
 
-    @mock.patch('dns_relay.netns')
+    @mock.patch('networking_cisco.plugins.cisco.cpnr.dns_relay.netns')
     @mock.patch('socket.socket')
     def test_open_dns_int_socket(self,
                                  mock_socket,
@@ -102,7 +104,7 @@ class TestDnsRelayAgent(unittest.TestCase):
         )
 
         # check exception thrown if no interfaces
-        with self.assertRaises(Exception):
+        with self.assertRaises(UnexpectedError):
             mock_netns.iflist.return_value = []
             sock, addr, port = relay._open_dns_int_socket()
 
@@ -126,7 +128,7 @@ class TestDnsPacket(unittest.TestCase):
 
     def test_parse(self):
         # test regular DNS request
-        fh = open('tests/unit/data/dns_req.txt', 'rb')
+        fh = open('networking_cisco/tests/unit/cisco/cpnr/data/dns_req.txt', 'rb')
         line = fh.read().strip()
         buf = bytearray.fromhex(line)
         pkt = DnsPacket.parse(buf, 28)
@@ -138,7 +140,7 @@ class TestDnsPacket(unittest.TestCase):
         fh.close()
 
         # test DNS request with EDNS0
-        fh = open('tests/unit/data/dns_req_edns0.txt', 'rb')
+        fh = open('networking_cisco/tests/unit/cisco/cpnr/data/dns_req_edns0.txt', 'rb')
         line = fh.read().strip()
         buf = bytearray.fromhex(line)
         pkt = DnsPacket.parse(buf, 38)
@@ -150,7 +152,7 @@ class TestDnsPacket(unittest.TestCase):
         fh.close()
 
         # test regular DNS response
-        fh = open('tests/unit/data/dns_rsp.txt', 'rb')
+        fh = open('networking_cisco/tests/unit/cisco/cpnr/data/dns_rsp.txt', 'rb')
         line = fh.read().strip()
         buf = bytearray.fromhex(line)
         pkt = DnsPacket.parse(buf, 44)
@@ -168,7 +170,7 @@ class TestDnsPacket(unittest.TestCase):
 
     def test_data(self):
         # call with regular DNS request
-        fh = open('tests/unit/data/dns_req.txt', 'rb')
+        fh = open('networking_cisco/tests/unit/cisco/cpnr/data/dns_req.txt', 'rb')
         line = fh.read().strip()
         buf = bytearray.fromhex(line)
         pktbuf = bytearray(4096)
@@ -183,7 +185,7 @@ class TestDnsPacket(unittest.TestCase):
         fh.close()
 
         # call with DNS request with EDNS0
-        fh = open('tests/unit/data/dns_req_edns0.txt', 'rb')
+        fh = open('networking_cisco/tests/unit/cisco/cpnr/data/dns_req_edns0.txt', 'rb')
         line = fh.read().strip()
         buf = bytearray.fromhex(line)
         pktbuf = bytearray(4096)
