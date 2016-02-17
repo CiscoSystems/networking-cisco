@@ -43,6 +43,13 @@ DHCP_SERVER_PORT = 67
 RLIMIT_NOFILE_LIMIT = 16384
 
 OPTS = [
+    cfg.StrOpt('http_server',
+               default="localhost:8080",
+               help=_('External HTTP server, should conform to '
+                      '<server_name:port> format.')),
+    cfg.StrOpt('admin_email',
+               default='test@example.com',
+               help=_('Email address of admin for internal DNS domain.')),
     cfg.StrOpt('external_interface',
                default='lo',
                help=_('Interface for communicating with DHCP/DNS server')),
