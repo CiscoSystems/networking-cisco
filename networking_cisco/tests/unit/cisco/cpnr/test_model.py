@@ -20,11 +20,13 @@ from neutron.tests import base
 from oslo_config import cfg
 
 from networking_cisco.plugins.cisco.cpnr import cpnr_client
+from networking_cisco.plugins.cisco.cpnr.dhcp_driver import OPTS
 from networking_cisco.plugins.cisco.cpnr import dhcpopts
 from networking_cisco.plugins.cisco.cpnr import model
 from networking_cisco.tests.unit.cisco.cpnr import fake_networks
 
 dhcp_agent.register_options(cfg.CONF)
+cfg.CONF.register_opts(OPTS, 'cisco_pnr')
 
 
 class TestModel(base.BaseTestCase):
@@ -260,9 +262,9 @@ class TestModel(base.BaseTestCase):
     def test_get_version(self):
         self.client.reset_mock()
 
-        self.client.get_version.return_value = "CPNR Version 8.3"
+        self.client.get_version.return_value = "CPNR Version 8.3.3"
         ver = model.get_version()
-        self.assertEqual(ver, '8.3')
+        self.assertEqual(ver, '8.3.3')
 
     def test_recover_networks(self):
         self.client.reset_mock()
