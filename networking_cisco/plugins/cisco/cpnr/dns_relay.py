@@ -25,8 +25,10 @@ from oslo_config import cfg
 from oslo_log import log as logging
 
 from neutron.common import config
+from neutron.common import exceptions
 
 from networking_cisco._i18n import _, _LE, _LW
+from networking_cisco.plugins.cisco.cpnr.cpnr_client import UnexpectedError
 from networking_cisco.plugins.cisco.cpnr import debug_stats
 from networking_cisco.plugins.cisco.cpnr import netns
 
@@ -160,7 +162,7 @@ class DnsRelayAgent(object):
         try:
             with self.ns_lock, netns.Namespace(namespace):
                 int_sock, int_addr, int_port = self._open_dns_int_socket()
-        except Exception:
+        except exceptions.BaseException:
             LOG.exception(_LE('Failed to open dns server socket in %s'),
                           namespace)
             del self.ns_states[namespace]
@@ -211,7 +213,8 @@ class DnsRelayAgent(object):
             if ifname == self.conf.cisco_pnr.external_interface:
                 break
         else:
-            raise Exception('Failed to find external intf matching config')
+            raise UnexpectedError(msg='Failed to find external '
+                                      'intf matching config')
 
         # open, bind, and connect UDP socket
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -226,7 +229,8 @@ class DnsRelayAgent(object):
         # list interfaces, make sure there is at least one
         interfaces = netns.iflist(ignore=("lo",))
         if not interfaces:
-            raise Exception("failed to find single interface in dhcp ns")
+            raise UnexpectedError(msg="failed to find "
+                                  "single interface in dhcp ns")
         ifname, addr, mask = interfaces[0]
 
         # open socket for receiving DNS requests and sending DNS responses

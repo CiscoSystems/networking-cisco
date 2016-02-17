@@ -237,6 +237,7 @@ class RemoteServerDriver(dhcp.DhcpBase):
         global _networks
         _networks = model.recover_networks()
 
+
 class SimpleCpnrDriver(RemoteServerDriver):
 
     MIN_VERSION = 8.3
