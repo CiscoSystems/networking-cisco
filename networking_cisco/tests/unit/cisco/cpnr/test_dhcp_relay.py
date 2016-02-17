@@ -17,12 +17,11 @@ from binascii import hexlify
 import mock
 import socket
 
+from networking_cisco.plugins.cisco.cpnr.cpnr_client import UnexpectedError
 from networking_cisco.plugins.cisco.cpnr.dhcp_relay import cfg
 from networking_cisco.plugins.cisco.cpnr.dhcp_relay import DhcpPacket
 from networking_cisco.plugins.cisco.cpnr.dhcp_relay import DhcpRelayAgent
 from networking_cisco.plugins.cisco.cpnr.dhcp_relay import OPTS
-
-from networking_cisco.plugins.cisco.cpnr.cpnr_client import UnexpectedError
 import unittest
 
 
@@ -122,7 +121,8 @@ class TestDhcpPacket(unittest.TestCase):
 
     def test_parse(self):
         # DHCP packet contains relay agent option 82
-        with open('networking_cisco/tests/unit/cisco/cpnr/data/dhcp_packet.txt', 'rb') as dhcp_file:
+        with open('networking_cisco/tests/unit/cisco/'
+                  'cpnr/data/dhcp_packet.txt', 'rb') as dhcp_file:
             lines = [line.strip() for line in dhcp_file]
             data = ''.join(lines)
             buf = bytearray.fromhex(data)
@@ -143,7 +143,8 @@ class TestDhcpPacket(unittest.TestCase):
                 packet.get_relay_option(220)
 
     def test_data(self):
-        with open('networking_cisco/tests/unit/cisco/cpnr/data/dhcp_packet.txt', 'rb') as dhcp_file:
+        with open('networking_cisco/tests/unit/cisco/'
+                  'cpnr/data/dhcp_packet.txt', 'rb') as dhcp_file:
             lines = [line.strip() for line in dhcp_file]
             data = ''.join(lines)
             buf = bytearray.fromhex(data)

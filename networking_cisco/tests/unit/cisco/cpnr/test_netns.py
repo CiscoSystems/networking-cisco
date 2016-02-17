@@ -42,7 +42,8 @@ class TestNetNs(unittest.TestCase):
 
     @mock.patch('subprocess.check_output')
     def test_iflist(self, mock_check_output):
-        fh = open('networking_cisco/tests/unit/cisco/cpnr/data/ip_addr_show.txt', 'rb')
+        fh = open('networking_cisco/tests/unit/cisco'
+                  '/cpnr/data/ip_addr_show.txt', 'rb')
         ip_addr_str = fh.read()
         fh.close()
         mock_check_output.return_value = ip_addr_str

@@ -18,12 +18,11 @@ import mock
 import socket
 import unittest
 
+from networking_cisco.plugins.cisco.cpnr.cpnr_client import UnexpectedError
 from networking_cisco.plugins.cisco.cpnr.dns_relay import cfg
 from networking_cisco.plugins.cisco.cpnr.dns_relay import DnsPacket
 from networking_cisco.plugins.cisco.cpnr.dns_relay import DnsRelayAgent
 from networking_cisco.plugins.cisco.cpnr.dns_relay import OPTS
-
-from networking_cisco.plugins.cisco.cpnr.cpnr_client import UnexpectedError
 
 
 class TestDnsRelayAgent(unittest.TestCase):
@@ -128,7 +127,8 @@ class TestDnsPacket(unittest.TestCase):
 
     def test_parse(self):
         # test regular DNS request
-        fh = open('networking_cisco/tests/unit/cisco/cpnr/data/dns_req.txt', 'rb')
+        fh = open('networking_cisco/tests/unit/'
+                  'cisco/cpnr/data/dns_req.txt', 'rb')
         line = fh.read().strip()
         buf = bytearray.fromhex(line)
         pkt = DnsPacket.parse(buf, 28)
@@ -140,7 +140,8 @@ class TestDnsPacket(unittest.TestCase):
         fh.close()
 
         # test DNS request with EDNS0
-        fh = open('networking_cisco/tests/unit/cisco/cpnr/data/dns_req_edns0.txt', 'rb')
+        fh = open('networking_cisco/tests/unit/'
+                  'cisco/cpnr/data/dns_req_edns0.txt', 'rb')
         line = fh.read().strip()
         buf = bytearray.fromhex(line)
         pkt = DnsPacket.parse(buf, 38)
@@ -152,7 +153,8 @@ class TestDnsPacket(unittest.TestCase):
         fh.close()
 
         # test regular DNS response
-        fh = open('networking_cisco/tests/unit/cisco/cpnr/data/dns_rsp.txt', 'rb')
+        fh = open('networking_cisco/tests/unit/'
+                  'cisco/cpnr/data/dns_rsp.txt', 'rb')
         line = fh.read().strip()
         buf = bytearray.fromhex(line)
         pkt = DnsPacket.parse(buf, 44)
@@ -170,7 +172,8 @@ class TestDnsPacket(unittest.TestCase):
 
     def test_data(self):
         # call with regular DNS request
-        fh = open('networking_cisco/tests/unit/cisco/cpnr/data/dns_req.txt', 'rb')
+        fh = open('networking_cisco/tests/unit/cisco/'
+                  'cpnr/data/dns_req.txt', 'rb')
         line = fh.read().strip()
         buf = bytearray.fromhex(line)
         pktbuf = bytearray(4096)
@@ -185,7 +188,8 @@ class TestDnsPacket(unittest.TestCase):
         fh.close()
 
         # call with DNS request with EDNS0
-        fh = open('networking_cisco/tests/unit/cisco/cpnr/data/dns_req_edns0.txt', 'rb')
+        fh = open('networking_cisco/tests/unit/cisco/cpnr'
+                  '/data/dns_req_edns0.txt', 'rb')
         line = fh.read().strip()
         buf = bytearray.fromhex(line)
         pktbuf = bytearray(4096)
