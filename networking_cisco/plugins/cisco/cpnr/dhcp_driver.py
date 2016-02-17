@@ -71,6 +71,12 @@ OPTS = [
 ]
 cfg.CONF.register_opts(OPTS, 'cisco_pnr')
 
+_devices = {}
+_networks = {}
+_queue = eventlet.queue.LightQueue()
+_locks = {}
+last_activity = time.time()
+
 
 class RemoteServerDriver(dhcp.DhcpBase):
 
@@ -156,7 +162,6 @@ class RemoteServerDriver(dhcp.DhcpBase):
             return
 
         global _devices
-        _devices = {}
         confs_dir = os.path.abspath(os.path.normpath(cfg.CONF.dhcp_confs))
         for netid in os.listdir(confs_dir):
             conf_dir = os.path.join(confs_dir, netid)
@@ -294,10 +299,6 @@ class SimpleCpnrDriver(RemoteServerDriver):
 
 
 class CpnrDriver(SimpleCpnrDriver):
-
-    # _queue = eventlet.queue.LightQueue()
-    # _locks = {}
-    # last_activity = time.time()
 
     def __init__(self, conf, network, root_helper='sudo',
                  version=None, plugin=None):
