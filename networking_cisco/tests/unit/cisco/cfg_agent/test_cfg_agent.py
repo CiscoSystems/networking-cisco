@@ -14,15 +14,16 @@
 
 import mock
 from oslo_config import cfg
+from oslo_utils import uuidutils
 import testtools
 
 from neutron.agent.common import config
 from neutron.common import config as base_config
 from neutron.common import constants as l3_constants
-from neutron.openstack.common import uuidutils
 from neutron.tests import base
 
 from networking_cisco.plugins.cisco.cfg_agent import cfg_agent
+
 
 _uuid = uuidutils.generate_uuid
 HOSTNAME = 'myhost'
@@ -63,28 +64,15 @@ def prepare_router_data(enable_snat=None, num_internal_ports=1):
     return router, int_ports
 
 
-class FakeFirewallSvcHelper(object):
-
-    def __init__(self, host, conf, cfg_agent):
-        pass
-
-
-class TestCiscoCfgAgentWIthStateReporting(base.BaseTestCase):
+class TestCiscoCfgAgentWithStateReporting(base.BaseTestCase):
 
     def setUp(self):
         self.conf = cfg.ConfigOpts()
         config.register_agent_state_opts_helper(cfg.CONF)
         self.conf.register_opts(base_config.core_opts)
-        self.conf.register_opts(cfg_agent.CiscoCfgAgent.OPTS, "cfg_agent")
-        # set class path to the fake firewall class since the real
-        # firewall calss will be in another package (neutron-fwaas)
-        self.conf.set_override('fw_svc_helper_class',
-                               'networking_cisco.tests.unit.cisco.cfg_agent.'
-                               'test_cfg_agent.FakeFirewallSvcHelper',
-                               'cfg_agent')
-
+        self.conf.register_opts(cfg_agent.OPTS, "cfg_agent")
         cfg.CONF.set_override('report_interval', 0, 'AGENT')
-        super(TestCiscoCfgAgentWIthStateReporting, self).setUp()
+        super(TestCiscoCfgAgentWithStateReporting, self).setUp()
         self.devmgr_plugin_api_cls_p = mock.patch(
             'networking_cisco.plugins.cisco.cfg_agent.cfg_agent.'
             'CiscoDeviceManagementApi')
@@ -134,6 +122,8 @@ class TestCiscoCfgAgentWIthStateReporting(base.BaseTestCase):
 
     def test_report_state(self):
         agent = cfg_agent.CiscoCfgAgentWithStateReport(HOSTNAME, self.conf)
+        # Set keepalive iteration to just before the reporting iteration
+        agent.keepalive_iteration = self.conf.cfg_agent.report_iteration - 1
         agent._report_state()
         self.assertIn('total routers', agent.agent_state['configurations'])
         self.assertEqual(0, agent.agent_state[
@@ -149,12 +139,50 @@ class TestCiscoCfgAgentWIthStateReporting(base.BaseTestCase):
         agent.send_agent_report(None, None)
         self.assertTrue(agent.heartbeat.stop.called)
 
-    def test_initialize_service_helpers_error(self):
-        self.conf.set_override('fw_svc_helper_class',
-                               'wrong.path.FakeFirewallSvcHelper',
-                               'cfg_agent')
+    def test_get_hosting_device_configuration(self):
+        routing_service_helper_mock = mock.MagicMock()
+        routing_service_helper_mock.driver_manager = mock.MagicMock()
+        drv_mgr = routing_service_helper_mock.driver_manager
+        drv = drv_mgr.get_driver_for_hosting_device.return_value
+        fake_running_config = 'a fake running config'
+        drv.get_configuration = mock.MagicMock(
+            return_value=fake_running_config)
+        hd_id = 'a_hd_id'
+        payload = {'hosting_device_id': hd_id}
         agent = cfg_agent.CiscoCfgAgentWithStateReport(HOSTNAME, self.conf)
-        # In this error scenario the exception ImportError has been caught
-        # and fw_service_helper is set to None. So we only need to evaluate
-        # if fw_service_helper is None.
-        self.assertEqual(None, agent.fw_service_helper)
+        agent.routing_service_helper = routing_service_helper_mock
+        res = agent.get_hosting_device_configuration(mock.MagicMock(), payload)
+        self.assertEqual(res, fake_running_config)
+        drv.get_configuration.assert_called_once_with()
+
+    def test_get_hosting_device_configuration_no_hosting_device(self):
+        routing_service_helper_mock = mock.MagicMock()
+        routing_service_helper_mock.driver_manager = mock.MagicMock()
+        drv_mgr = routing_service_helper_mock.driver_manager
+        drv = drv_mgr.get_driver_for_hosting_device.return_value
+        fake_running_config = 'a fake running config'
+        drv.get_configuration = mock.MagicMock(
+            return_value=fake_running_config)
+        hd_id = None
+        payload = {'hosting_device_id': hd_id}
+        agent = cfg_agent.CiscoCfgAgentWithStateReport(HOSTNAME, self.conf)
+        agent.routing_service_helper = routing_service_helper_mock
+        res = agent.get_hosting_device_configuration(mock.MagicMock(), payload)
+        self.assertIsNone(res)
+        drv.get_configuration.assert_not_called()
+
+    def test_get_hosting_device_configuration_no_svc_helper(self):
+        routing_service_helper_mock = mock.MagicMock()
+        routing_service_helper_mock.driver_manager = mock.MagicMock()
+        drv_mgr = routing_service_helper_mock.driver_manager
+        drv = drv_mgr.get_driver_for_hosting_device.return_value
+        fake_running_config = 'a fake running config'
+        drv.get_configuration = mock.MagicMock(
+            return_value=fake_running_config)
+        hd_id = 'a_hd_id'
+        payload = {'hosting_device_id': hd_id}
+        agent = cfg_agent.CiscoCfgAgentWithStateReport(HOSTNAME, self.conf)
+        agent.routing_service_helper = None
+        res = agent.get_hosting_device_configuration(mock.MagicMock(), payload)
+        self.assertIsNone(res)
+        drv.get_configuration.assert_not_called()

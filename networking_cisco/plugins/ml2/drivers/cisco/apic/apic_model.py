@@ -18,7 +18,6 @@ from sqlalchemy import orm
 
 from neutron.db import api as db_api
 from neutron.db import model_base
-
 from neutron.db import models_v2
 from neutron.plugins.ml2 import models as models_ml2
 
@@ -34,8 +33,7 @@ class RouterContract(model_base.BASEV2, models_v2.HasTenant):
 
     __tablename__ = 'cisco_ml2_apic_contracts'
 
-    router_id = sa.Column(sa.String(64), sa.ForeignKey('routers.id',
-                                                       ondelete='CASCADE'),
+    router_id = sa.Column(sa.String(36), sa.ForeignKey('routers.id'),
                           primary_key=True)
 
 

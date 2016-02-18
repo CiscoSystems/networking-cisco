@@ -16,9 +16,11 @@
 import contextlib
 import mock
 
+from oslo_config import cfg
 from oslo_log import log as logging
 import webob.exc as wexc
 
+import networking_cisco.tests.unit.cisco.test_setup_monkeypatch  # noqa
 from networking_cisco.plugins.ml2.drivers.cisco.nexus import (
     config as cisco_config)
 from networking_cisco.plugins.ml2.drivers.cisco.nexus import (
@@ -118,6 +120,11 @@ class CiscoML2MechanismTestCase(test_plugin.Ml2PluginV2TestCase):
 
         if self._testMethodName in self._unsupported:
             self.skipTest("Unsupported test case")
+
+        cfg.CONF.import_opt('api_workers', 'neutron.service')
+        cfg.CONF.set_override('api_workers', 0)
+        cfg.CONF.import_opt('rpc_workers', 'neutron.service')
+        cfg.CONF.set_override('rpc_workers', 0)
 
         # Configure the Cisco Nexus mechanism driver
         nexus_config = {
@@ -264,8 +271,7 @@ class CiscoML2MechanismTestCase(test_plugin.Ml2PluginV2TestCase):
         result = all(word in last_cfg for word in words)
 
         # If persistent_switch_config, 'copy run start' also sent.
-        if (result is True and
-            cisco_config.cfg.CONF.ml2_cisco.persistent_switch_config):
+        if result is True and cfg.CONF.ml2_cisco.persistent_switch_config:
             last_cfg = (self.mock_ncclient.connect.return_value.
                         edit_config.mock_calls[-1][2]['config'])
             preserve_words = ['copy', 'running-config', 'startup-config']
@@ -491,8 +497,7 @@ class TestCiscoPortsV2(CiscoML2MechanismTestCase,
            self._is_in_last_nexus_cfg which checks that
            other configure staggered around 'copy run start'.
         """
-        cisco_config.cfg.CONF.set_override('persistent_switch_config',
-            True, 'ml2_cisco')
+        cfg.CONF.set_override('persistent_switch_config', True, 'ml2_cisco')
 
         self.test_nexus_enable_vlan_cmd_on_same_host()
 
@@ -593,31 +598,6 @@ class TestCiscoPortsV2(CiscoML2MechanismTestCase,
 #        self._test_nexus_providernet(auto_create=True, auto_trunk=True,
 #                                     name=P_VLAN_NAME_TOO_LONG)
 
-    def test_ncclient_version_detect(self):
-        """Test ability to handle connection to old and new-style ncclient.
-
-        We used to require a custom version of the ncclient library. However,
-        recent contributions to the ncclient make this unnecessary. Our
-        driver was modified to be able to establish a connection via both
-        the old and new type of ncclient.
-
-        The new style ncclient.connect() function takes one additional
-        parameter.
-
-        The ML2 driver uses this to detect whether we are dealing with an
-        old or new ncclient installation.
-
-        """
-        # The code we are exercising calls connect() twice, if there is a
-        # TypeError on the first call (if the old ncclient is installed).
-        # The second call should succeed. That's what we are simulating here.
-        orig_connect_return_val = self.mock_ncclient.connect.return_value
-        with self._patch_ncclient('connect.side_effect',
-                                  [TypeError, orig_connect_return_val]):
-            with self._create_resources() as result:
-                self.assertEqual(result.status_int,
-                                 wexc.HTTPOk.code)
-
     def test_ncclient_get_config_fail(self):
         """Test that the connection is reset after a get_config error
 
@@ -626,13 +606,15 @@ class TestCiscoPortsV2(CiscoML2MechanismTestCase,
         """
 
         with self._patch_ncclient(
-            'connect.return_value.edit_config.side_effect',
+            'connect.return_value.get.side_effect',
             [IOError, None, None]):
             with self._create_resources() as result:
                 self._assertExpectedHTTP(result.status_int,
                                          c_exc.NexusConfigFailed)
-            #on deleting the resources, connect should be called a second time
-            self.assertEqual(self.mock_ncclient.connect.call_count, 2)
+            # on deleting the resources, connect called 3 times
+            # +1 1st connect during Create vlan + 1 connect during get
+            # during loop after failure + 1 connect during delete
+            self.assertEqual(self.mock_ncclient.connect.call_count, 3)
 
     def test_ncclient_fail_on_second_connect(self):
         """Test that other errors during connect() sequences are still handled.
@@ -695,7 +677,7 @@ class TestCiscoPortsV2(CiscoML2MechanismTestCase,
                         with _create_port_check_vlan(
                             COMP_HOST_NAME_2,
                             DEVICE_ID_2,
-                            vlan_creation_expected=False):
+                            vlan_creation_expected=True):
                             pass
 
                         # Instance on second host is now terminated.
@@ -804,6 +786,8 @@ class TestCiscoPortsV2(CiscoML2MechanismTestCase,
             mock_edit_config_a):
             with self._create_resources() as result:
                 self.assertEqual(result.status_int, wexc.HTTPOk.code)
+                # No reconnect attempted...call_count will be one
+                self.assertEqual(self.mock_ncclient.connect.call_count, 1)
 
         def mock_edit_config_b(target, config):
             if all(word in config for word in ['no', 'shutdown']):
@@ -814,6 +798,8 @@ class TestCiscoPortsV2(CiscoML2MechanismTestCase,
             mock_edit_config_b):
             with self._create_resources() as result:
                 self.assertEqual(result.status_int, wexc.HTTPOk.code)
+                # No reconnect attempted...call_count will be one
+                self.assertEqual(self.mock_ncclient.connect.call_count, 1)
 
     def test_nexus_vlan_config_rollback(self):
         """Test rollback following Nexus VLAN state config failure.
@@ -988,8 +974,7 @@ class TestCiscoPortsV2(CiscoML2MechanismTestCase,
 
         # Set configuration variable to add/delete the VXLAN global nexus
         # switch values.
-        cisco_config.cfg.CONF.set_override('vxlan_global_config', True,
-                                           'ml2_cisco')
+        cfg.CONF.set_override('vxlan_global_config', True, 'ml2_cisco')
 
         # Configure bound segments to indicate VXLAN+VLAN.
         self.mock_top_bound_segment.return_value = BOUND_SEGMENT_VXLAN
@@ -1101,6 +1086,33 @@ class TestCiscoPortsV2(CiscoML2MechanismTestCase,
             with self._create_resources():
                 assert(len(nexus_db_v2.get_nexusport_switch_bindings
                            (NEXUS_IP_ADDR)) == 1)
+
+    def test_nexus_ncclient_disconnect(self):
+        """Test handling of closing ncclient sessions.
+
+        When multi neutron-server processes are used verify that ncclient
+        close_session method is called.
+
+        """
+
+        # Mock to keep track of number of close_session calls.
+        ncclient_close = mock.patch.object(
+            nexus_network_driver.CiscoNexusDriver,
+            '_close_session').start()
+
+        # Verify that ncclient is not closed by default.
+        with self._create_resources():
+            assert not ncclient_close.called
+
+        # Patch to close ncclient session.
+        mock.patch.object(nexus_network_driver.CiscoNexusDriver,
+                          '_get_close_ssh_session',
+                          return_value=True).start()
+
+        # Verify that ncclient close is called twice. For create VLAN and
+        # trunk interface calls.
+        with self._create_resources():
+            self.assertEqual(ncclient_close.call_count, 2)
 
 
 class TestCiscoNetworksV2(CiscoML2MechanismTestCase,

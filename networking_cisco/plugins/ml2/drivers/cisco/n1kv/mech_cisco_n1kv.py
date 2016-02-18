@@ -37,6 +37,7 @@ from networking_cisco.plugins.ml2.drivers.cisco.n1kv import (
 from neutron.common import constants as n_const
 from neutron.db import db_base_plugin_v2
 from neutron.extensions import portbindings
+from neutron.extensions import providernet
 from neutron.i18n import _LE
 from neutron.i18n import _LI
 from neutron.i18n import _LW
@@ -55,6 +56,8 @@ class N1KVMechanismDriver(api.MechanismDriver):
 
     def initialize(self):
         # Extend extension to service mapping dict
+
+        # TODO(sakvarma) Check if this mapping can be removed
         p_const.EXT_TO_SERVICE_MAPPING['cisco_n1kv_profile'] = (n1kv_const.
                                                                 CISCO_N1KV)
         self.n1kvclient = n1kv_client.Client()
@@ -65,38 +68,42 @@ class N1KVMechanismDriver(api.MechanismDriver):
         eventlet.spawn(self.sync_obj.do_sync)
 
         # Get VLAN/VXLAN network profiles name
-        self.netp_name = {p_const.TYPE_VLAN: (cfg.CONF.ml2_cisco_n1kv.
-                                              default_vlan_network_profile),
-                          p_const.TYPE_VXLAN: (cfg.CONF.ml2_cisco_n1kv.
-                                               default_vxlan_network_profile)}
+        self.netp_name = {p_const.TYPE_VLAN: (
+                              n1kv_const.DEFAULT_VLAN_NETWORK_PROFILE_NAME),
+                          p_const.TYPE_VXLAN: (
+                              n1kv_const.DEFAULT_VXLAN_NETWORK_PROFILE_NAME)}
         # Ensure network profiles are created on the VSM
         try:
             self._ensure_network_profiles_created_on_vsm()
         except (n1kv_exc.VSMConnectionFailed, n1kv_exc.VSMError):
-            LOG.error(_LE("VSM Failed to create default network profiles."))
+            LOG.error(_LE("VSM failed to create default network profiles."))
         self.vif_type = portbindings.VIF_TYPE_OVS
         self.vif_details = {portbindings.CAP_PORT_FILTER: True,
                             portbindings.OVS_HYBRID_PLUG: True}
         self.supported_network_types = [p_const.TYPE_VLAN, p_const.TYPE_VXLAN]
 
-    def _ensure_network_profiles_created_on_vsm(self, db_session=None):
+    def _ensure_network_profiles_created_on_vsm(self):
         # Try to create logical networks and network profiles on the VSM if
         # they don't exist already.
         for netp_type in [p_const.TYPE_VLAN, p_const.TYPE_VXLAN]:
             try:
-                netp = n1kv_db.get_network_profile_by_type(netp_type)
+                netp = n1kv_db.get_network_profile_by_name(
+                    self.netp_name[netp_type])
             except n1kv_exc.NetworkProfileNotFound:
+                if netp_type == p_const.TYPE_VXLAN:
+                    sub_type = n1kv_const.CLI_VXLAN_MODE_ENHANCED
+                else:
+                    sub_type = None
                 # Create a network profile in Neutron DB
                 netp = n1kv_db.add_network_profile(self.netp_name[netp_type],
-                                                   netp_type,
-                                                   db_session)
+                                                   netp_type, sub_type)
                 try:
-                    # Create a network profile of type VLAN on the VSM
+                    # Create a network profile on the VSM
                     self.n1kvclient.create_network_segment_pool(netp)
                 # Catch any exception here and cleanup if so
                 except (n1kv_exc.VSMConnectionFailed, n1kv_exc.VSMError):
                     with excutils.save_and_reraise_exception():
-                        n1kv_db.remove_network_profile(netp.id, db_session)
+                        n1kv_db.remove_network_profile(netp.id)
 
     def _is_segment_valid_for_n1kv(self, segment_id, network_type):
         """Validate the segment for Cisco Nexus1000V."""
@@ -128,18 +135,10 @@ class N1KVMechanismDriver(api.MechanismDriver):
         if not self._is_segment_valid_for_n1kv(segment['segmentation_id'],
                                                network_type):
             return
-        # Retrieve the network profile for network binding
-        try:
-            netp = n1kv_db.get_network_profile_by_type(network_type, session)
-        except n1kv_exc.NetworkProfileNotFound:
-            raise ml2_exc.MechanismDriverError()
-
-        kwargs = {"network_id": network['id'],
-                  "network_type": network_type,
-                  "db_session": session,
-                  "segment_id": segment['segmentation_id'],
-                  "netp_id": netp['id']}
-        n1kv_db.add_network_binding(**kwargs)
+        # update network binding here
+        n1kv_db.update_network_binding_with_segment_id(
+            net_id=network['id'], segment_id=segment['segmentation_id'],
+            db_session=session)
 
     def create_network_postcommit(self, context):
         """Send network parameters to the VSM."""
@@ -151,13 +150,13 @@ class N1KVMechanismDriver(api.MechanismDriver):
                                                network_type):
             return
         session = context._plugin_context.session
-        netp = n1kv_db.get_network_profile_by_type(network_type, session)
+        binding = n1kv_db.get_network_binding(network['id'], session)
+        netp = n1kv_db.get_network_profile_by_uuid(binding.profile_id, session)
+        network[providernet.SEGMENTATION_ID] = binding.segmentation_id
         try:
             self.n1kvclient.create_network_segment(network, netp)
-        except(n1kv_exc.VSMError, n1kv_exc.VSMConnectionFailed) as e:
-            with excutils.save_and_reraise_exception(reraise=False):
-                LOG.info(e.message)
-                raise ml2_exc.MechanismDriverError()
+        except(n1kv_exc.VSMError, n1kv_exc.VSMConnectionFailed):
+            raise ml2_exc.MechanismDriverError()
         LOG.info(_LI("Create network(postcommit) succeeded for network: "
                      "%(network_id)s of type: %(network_type)s with segment "
                      "id: %(segment_id)s"),
@@ -175,14 +174,14 @@ class N1KVMechanismDriver(api.MechanismDriver):
         if not self._is_segment_valid_for_n1kv(segment['segmentation_id'],
                                                network_type):
             return
-        # Perform network update on VSM in case of network name change only.
-        if updated_network['name'] != old_network['name']:
+        modifiable_vals = ['name', 'shared']
+        # Perform network update on VSM only if a modifiable value changed.
+        if any(updated_network[val] != old_network[val]
+               for val in modifiable_vals):
             try:
                 self.n1kvclient.update_network_segment(updated_network)
-            except(n1kv_exc.VSMError, n1kv_exc.VSMConnectionFailed) as e:
-                with excutils.save_and_reraise_exception(reraise=False):
-                    LOG.info(e.message)
-                    raise ml2_exc.MechanismDriverError()
+            except(n1kv_exc.VSMError, n1kv_exc.VSMConnectionFailed):
+                raise ml2_exc.MechanismDriverError()
         LOG.info(_LI("Update network(postcommit) succeeded for network: %s") %
                  old_network['id'])
 
@@ -197,10 +196,8 @@ class N1KVMechanismDriver(api.MechanismDriver):
             return
         try:
             self.n1kvclient.delete_network_segment(network['id'], network_type)
-        except(n1kv_exc.VSMError, n1kv_exc.VSMConnectionFailed) as e:
-            with excutils.save_and_reraise_exception(reraise=False):
-                LOG.info(e.message)
-                raise ml2_exc.MechanismDriverError()
+        except(n1kv_exc.VSMError, n1kv_exc.VSMConnectionFailed):
+            raise ml2_exc.MechanismDriverError()
         LOG.info(_LI("Delete network(postcommit) succeeded for network: "
                      "%(network_id)s of type: %(network_type)s with segment "
                      "ID: %(segment_id)s"),
@@ -213,10 +210,8 @@ class N1KVMechanismDriver(api.MechanismDriver):
         subnet = context.current
         try:
             self.n1kvclient.create_ip_pool(subnet)
-        except(n1kv_exc.VSMError, n1kv_exc.VSMConnectionFailed) as e:
-            with excutils.save_and_reraise_exception(reraise=False):
-                LOG.info(e.message)
-                raise ml2_exc.MechanismDriverError()
+        except(n1kv_exc.VSMError, n1kv_exc.VSMConnectionFailed):
+            raise ml2_exc.MechanismDriverError()
         LOG.info(_LI("Create subnet(postcommit) succeeded for subnet: "
                      "ID: %s"), subnet['id'])
 
@@ -225,10 +220,8 @@ class N1KVMechanismDriver(api.MechanismDriver):
         updated_subnet = context.current
         try:
             self.n1kvclient.update_ip_pool(updated_subnet)
-        except(n1kv_exc.VSMError, n1kv_exc.VSMConnectionFailed) as e:
-            with excutils.save_and_reraise_exception(reraise=False):
-                LOG.info(e.message)
-                raise ml2_exc.MechanismDriverError()
+        except(n1kv_exc.VSMError, n1kv_exc.VSMConnectionFailed):
+            raise ml2_exc.MechanismDriverError()
         LOG.info(_LI("Update subnet(postcommit) succeeded for subnet: "
                      "ID: %s"), updated_subnet['id'])
 
@@ -236,10 +229,8 @@ class N1KVMechanismDriver(api.MechanismDriver):
         """Send delete subnet notification to the VSM."""
         try:
             self.n1kvclient.delete_ip_pool(context.current['id'])
-        except(n1kv_exc.VSMError, n1kv_exc.VSMConnectionFailed) as e:
-            with excutils.save_and_reraise_exception(reraise=False):
-                LOG.info(e.message)
-                raise ml2_exc.MechanismDriverError()
+        except(n1kv_exc.VSMError, n1kv_exc.VSMConnectionFailed):
+            raise ml2_exc.MechanismDriverError()
         LOG.info(_LI("Delete subnet(postcommit) succeeded for subnet: "
                      "ID: %s"), context.current['id'])
 
@@ -259,16 +250,45 @@ class N1KVMechanismDriver(api.MechanismDriver):
             self.n1kvclient.create_n1kv_port(port,
                                              vmnetwork_name,
                                              policy_profile)
-        except(n1kv_exc.VSMError, n1kv_exc.VSMConnectionFailed) as e:
-            with excutils.save_and_reraise_exception(reraise=False):
-                LOG.info(e.message)
-                raise ml2_exc.MechanismDriverError()
+        except(n1kv_exc.VSMError, n1kv_exc.VSMConnectionFailed):
+            raise ml2_exc.MechanismDriverError()
         LOG.info(_LI("Create port(postcommit) succeeded for port: "
                      "%(id)s on network: %(network_id)s with policy "
                      "profile ID: %(profile_id)s"),
                  {"network_id": port['network_id'],
                   "id": port['id'],
                   "profile_id": policy_profile.id})
+
+    def update_port_postcommit(self, context):
+        """Send port parameters to the VSM."""
+        port = context.current
+        old_port = context.original
+        # Perform port update on VSM only if a router or DHCP port is bound.
+        if (not old_port['binding:host_id'] and
+                (port['device_owner'] in [n_const.DEVICE_OWNER_ROUTER_INTF,
+                                          n_const.DEVICE_OWNER_DHCP])):
+            session = context._plugin_context.session
+            binding = n1kv_db.get_policy_binding(port['id'], session)
+            policy_profile = n1kv_db.get_policy_profile_by_uuid(
+                session, binding.profile_id)
+            if policy_profile is None:
+                raise ml2_exc.MechanismDriverError()
+            vmnetwork_name = "%s%s_%s" % (n1kv_const.VM_NETWORK_PREFIX,
+                                          binding.profile_id,
+                                          port['network_id'])
+            try:
+                # Today an update is just a create, so we call create port
+                self.n1kvclient.create_n1kv_port(port,
+                                                 vmnetwork_name,
+                                                 policy_profile)
+            except(n1kv_exc.VSMError, n1kv_exc.VSMConnectionFailed):
+                raise ml2_exc.MechanismDriverError()
+            LOG.info(_LI("Update port(postcommit) succeeded for port: "
+                         "%(id)s on network: %(network_id)s with policy "
+                         "profile ID: %(profile_id)s"),
+                     {"network_id": port['network_id'],
+                      "id": port['id'],
+                      "profile_id": policy_profile.id})
 
     def delete_port_postcommit(self, context):
         """Send delete port notification to the VSM."""
@@ -285,10 +305,8 @@ class N1KVMechanismDriver(api.MechanismDriver):
                                       port['network_id'])
         try:
             self.n1kvclient.delete_n1kv_port(vmnetwork_name, port['id'])
-        except(n1kv_exc.VSMError, n1kv_exc.VSMConnectionFailed) as e:
-            with excutils.save_and_reraise_exception(reraise=False):
-                LOG.info(e.message)
-                raise ml2_exc.MechanismDriverError()
+        except(n1kv_exc.VSMError, n1kv_exc.VSMConnectionFailed):
+            raise ml2_exc.MechanismDriverError()
         LOG.info(_LI("Delete port(postcommit) succeeded for port: "
                      "%(id)s on network: %(network_id)s with policy "
                      "profile ID: %(profile_id)s"),

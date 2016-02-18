@@ -19,23 +19,27 @@ import netaddr
 from oslo_config import cfg
 from oslo_log import log
 from oslo_utils import excutils
+import six
 import sqlalchemy as sa
 
 from networking_cisco.plugins.ml2.drivers.cisco.nexus import (
     constants as const)
+from networking_cisco.plugins.ml2.drivers.cisco.nexus import (
+    nexus_models_v2)
 
+from neutron.common import constants as consts
 from neutron.common import exceptions as exc
 from neutron.db import api as db_api
 from neutron.i18n import _LE, _LI, _LW
 from neutron.plugins.common import constants as p_const
 from neutron.plugins.ml2 import driver_api as api
-from neutron.plugins.ml2.drivers.cisco.nexus import nexus_models_v2
 from neutron.plugins.ml2.drivers import type_tunnel
+from neutron.plugins.ml2.drivers import type_vxlan
 
 LOG = log.getLogger(__name__)
 
 # Nexus switches start VNI at 4096 = max VLAN + 2 (2 for reserved VLAN 0, 4095)
-MIN_NEXUS_VNI = p_const.MAX_VLAN_TAG + 2
+MIN_NEXUS_VNI = consts.MAX_VLAN_TAG + 2
 
 nexus_vxlan_opts = [
     cfg.ListOpt('vni_ranges',
@@ -115,7 +119,7 @@ class NexusVxlanTypeDriver(type_tunnel.TunnelTypeDriver):
                         "tunnel range."))
 
     def _is_valid_nexus_vni(self, vni):
-        return MIN_NEXUS_VNI <= vni <= p_const.MAX_VXLAN_VNI
+        return MIN_NEXUS_VNI <= vni <= type_vxlan.MAX_VXLAN_VNI
 
     def _parse_mcast_ranges(self):
         ranges = (range.split(':') for range in self.conf_mcast_ranges)
@@ -170,7 +174,7 @@ class NexusVxlanTypeDriver(type_tunnel.TunnelTypeDriver):
         # determine current configured allocatable vnis
         vxlan_vnis = set()
         for tun_min, tun_max in self.tunnel_ranges:
-            vxlan_vnis |= set(xrange(tun_min, tun_max + 1))
+            vxlan_vnis |= set(six.moves.range(tun_min, tun_max + 1))
 
         session = db_api.get_session()
         with session.begin(subtransactions=True):
@@ -250,6 +254,9 @@ class NexusVxlanTypeDriver(type_tunnel.TunnelTypeDriver):
         pass
 
     def delete_endpoint(self, ip):
+        pass
+
+    def delete_endpoint_by_host_or_ip(self, host, ip):
         pass
 
     def get_endpoint_by_host(self, host):

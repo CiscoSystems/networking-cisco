@@ -41,8 +41,8 @@ from neutron.openstack.common import service
 from neutron import service as neutron_service
 
 from networking_cisco.plugins.cisco.cfg_agent import device_status
-from networking_cisco.plugins.cisco.common import (
-    cisco_constants as c_constants)
+from networking_cisco.plugins.cisco.common import (cisco_constants as
+                                                   c_constants)
 
 LOG = logging.getLogger(__name__)
 
@@ -70,10 +70,59 @@ class CiscoDeviceManagementApi(object):
         cctxt.cast(context, 'report_non_responding_hosting_devices',
                    host=self.host, hosting_device_ids=hd_ids)
 
+    def report_revived_hosting_devices(self, context, hd_ids=None):
+        cctxt = self.client.prepare(version='1.1')
+        cctxt.cast(context, 'update_hosting_device_status',
+                   host=self.host,
+                   status_info={c_constants.HD_ACTIVE: hd_ids})
+
     def register_for_duty(self, context):
         """Report that a config agent is ready for duty."""
         cctxt = self.client.prepare()
         return cctxt.call(context, 'register_for_duty', host=self.host)
+
+    def get_hosting_devices_for_agent(self, context):
+        """Get a list of hosting devices assigned to this agent."""
+        cctxt = self.client.prepare()
+        return cctxt.call(context,
+                          'get_hosting_devices_for_agent',
+                          host=self.host)
+
+OPTS = [
+    cfg.IntOpt('rpc_loop_interval', default=10,
+               help=_("Interval when the process_services() loop "
+                      "executes in seconds. This is when the config agent "
+                      "lets each service helper to process its neutron "
+                      "resources.")),
+    cfg.StrOpt('routing_svc_helper_class',
+               default='networking_cisco.plugins.cisco.cfg_agent.'
+                       'service_helpers.routing_svc_helper.'
+                       'RoutingServiceHelper',
+               help=_("Path of the routing service helper class.")),
+    cfg.BoolOpt('enable_heartbeat',
+                default=True,
+                help=_("If enabled, the agent will maintain a heartbeat "
+                       "against its hosting-devices. If a device dies "
+                       "and recovers, the agent will then trigger a "
+                       "configuration resync.")),
+    cfg.IntOpt('heartbeat_interval', default=5,
+               help=_("Interval in seconds when the config agent runs the "
+                      "backlog / hosting-device heart beat task.")),
+    cfg.IntOpt('max_device_sync_attempts', default=6,
+               help=_("Maximum number of attempts for a device sync")),
+    cfg.IntOpt('keepalive_interval', default=10,
+               help=_("Interval in seconds when the config agent sents a "
+                      "timestamp to the plugin to say that it is alive.")),
+    cfg.IntOpt('report_iteration', default=6,
+               help=_("The iteration where the config agent sends a full "
+                      "status report to the plugin.The default is every "
+                      "6th iteration of the keep alive interval. This "
+                      "means with default value of keepalive_interval "
+                      "(10sec), a full report is sent once every "
+                      "6*10 = 60 seconds")),
+]
+
+cfg.CONF.register_opts(OPTS, "cfg_agent")
 
 
 class CiscoCfgAgent(manager.Manager):
@@ -98,25 +147,11 @@ class CiscoCfgAgent(manager.Manager):
     """
     target = oslo_messaging.Target(version='1.1')
 
-    OPTS = [
-        cfg.IntOpt('rpc_loop_interval', default=10,
-                   help=_("Interval when the process_services() loop "
-                          "executes in seconds. This is when the config agent "
-                          "lets each service helper to process its neutron "
-                          "resources.")),
-        cfg.StrOpt('routing_svc_helper_class',
-           default='networking_cisco.plugins.cisco.cfg_agent.service_helpers'
-           '.routing_svc_helper.RoutingServiceHelper',
-           help=_("Path of the routing service helper class.")),
-        cfg.StrOpt('fw_svc_helper_class',
-                   default='neutron_fwaas.services.firewall.drivers.cisco'
-                           '.csr_firewall_svc_helper.CsrFirewallServiceHelper',
-                   help=_("Path of the firewall service helper class.")),
-    ]
-
     def __init__(self, host, conf=None):
         self.conf = conf or cfg.CONF
         self._dev_status = device_status.DeviceStatus()
+        self._dev_status.enable_heartbeat = (
+            self.conf.cfg_agent.enable_heartbeat)
         self.context = n_context.get_admin_context_without_session()
 
         self._initialize_rpc(host)
@@ -125,7 +160,8 @@ class CiscoCfgAgent(manager.Manager):
         super(CiscoCfgAgent, self).__init__(host=self.conf.host)
 
     def _initialize_rpc(self, host):
-        self.devmgr_rpc = CiscoDeviceManagementApi(topics.L3PLUGIN, host)
+        self.devmgr_rpc = CiscoDeviceManagementApi(
+            c_constants.DEVICE_MANAGER_PLUGIN, host)
 
     def _initialize_service_helpers(self, host):
         svc_helper_class = self.conf.cfg_agent.routing_svc_helper_class
@@ -134,21 +170,10 @@ class CiscoCfgAgent(manager.Manager):
                 svc_helper_class, host, self.conf, self)
         except ImportError as e:
             LOG.warning(_LW("Error in loading routing service helper. Class "
-                       "specified is %(class)s. Reason:%(reason)s"),
-                     {'class': self.conf.cfg_agent.routing_svc_helper_class,
-                      'reason': e})
+                            "specified is %(class)s. Reason:%(reason)s"),
+                        {'class': self.conf.cfg_agent.routing_svc_helper_class,
+                         'reason': e})
             self.routing_service_helper = None
-
-        fw_svc_helper_class = self.conf.cfg_agent.fw_svc_helper_class
-        try:
-            self.fw_service_helper = importutils.import_object(
-                fw_svc_helper_class, host, self.conf, self)
-        except ImportError as e:
-            LOG.warn(_LW("Error in loading firewall service helper. Class "
-                       "specified is %(class)s. Reason:%(reason)s"),
-                     {'class': self.conf.cfg_agent.fw_svc_helper_class,
-                      'reason': e})
-            self.fw_service_helper = None
 
     def _start_periodic_tasks(self):
         self.loop = loopingcall.FixedIntervalLoopingCall(self.process_services)
@@ -161,7 +186,7 @@ class CiscoCfgAgent(manager.Manager):
         return self.routing_service_helper
 
     ## Periodic tasks ##
-    @periodic_task.periodic_task
+    @periodic_task.periodic_task(spacing=cfg.CONF.cfg_agent.heartbeat_interval)
     def _backlog_task(self, context):
         """Process backlogged devices."""
         LOG.debug("Processing backlog.")
@@ -216,11 +241,6 @@ class CiscoCfgAgent(manager.Manager):
                                                         removed_devices_info)
         else:
             LOG.warning(_LW("No routing service helper loaded"))
-
-        if self.fw_service_helper:
-            self.fw_service_helper.process_service(device_ids,
-                                                   removed_devices_info)
-
         LOG.debug("Processing services completed")
 
     def _process_backlogged_hosting_devices(self, context):
@@ -231,16 +251,81 @@ class CiscoCfgAgent(manager.Manager):
         `process_services()` passing the now reachable device's id.
         For devices which have passed the `hosting_device_dead_timeout` and
         hence presumed dead, execute a RPC to the plugin informing that.
+
+        heartbeat revision
+        res['reachable'] - hosting device went from Unknown to Active state
+                           process_services(...)
+        res['revived']   - hosting device went from Dead to Active
+                           inform device manager that the hosting
+                           device is now responsive
+        res['dead']      - hosting device went from Unknown to Dead
+                           inform device manager that the hosting
+                           device is non-responding
+
+        As additional note for the revived case:
+            Although the plugin was notified, there may be some lag
+            before the plugin actually can reschedule it's backlogged routers.
+
+            If process_services(device_ids...) isn't successful initially,
+            subsequent device syncs will be attempted until
+            MAX_DEVICE_SYNC_ATTEMPTS occurs.  Main process_service task
+            will resume if sync_devices is populated.
+
         :param context: RPC context
         :return: None
         """
-        res = self._dev_status.check_backlogged_hosting_devices()
+        driver_mgr = self.get_routing_service_helper().driver_manager
+        res = self._dev_status.check_backlogged_hosting_devices(driver_mgr)
         if res['reachable']:
             self.process_services(device_ids=res['reachable'])
+        if res['revived']:
+            LOG.debug("Reporting revived hosting devices: %s " %
+                      res['revived'])
+            # trigger a sync only on the revived hosting-devices
+            if self.conf.cfg_agent.enable_heartbeat is True:
+                self.devmgr_rpc.report_revived_hosting_devices(
+                    context, hd_ids=res['revived'])
+                self.process_services(device_ids=res['revived'])
         if res['dead']:
             LOG.debug("Reporting dead hosting devices: %s", res['dead'])
             self.devmgr_rpc.report_dead_hosting_devices(context,
                                                         hd_ids=res['dead'])
+
+    def agent_updated(self, context, payload):
+        """Deal with agent updated RPC message."""
+        try:
+            if payload['admin_state_up']:
+                #TODO(hareeshp): implement agent updated handling
+                pass
+        except KeyError as e:
+            LOG.error(_LE("Invalid payload format for received RPC message "
+                          "agent_updated`. Error is %(error)s. Payload is "
+                          "%(payload)s"), {'error': e, 'payload': payload})
+
+    def hosting_devices_assigned_to_cfg_agent(self, context, payload):
+        """Deal with hosting devices assigned to this config agent."""
+        LOG.debug("Got hosting device assigned, payload: %s" % payload)
+        try:
+            if payload['hosting_device_ids']:
+                #TODO(hareeshp): implement assignment of hosting devices
+                self.routing_service_helper.fullsync = True
+        except KeyError as e:
+            LOG.error(_LE("Invalid payload format for received RPC message "
+                          "hosting_devices_assigned_to_cfg_agent`. Error is "
+                          "%(error)s. Payload is %(payload)s"),
+                      {'error': e, 'payload': payload})
+
+    def hosting_devices_unassigned_from_cfg_agent(self, context, payload):
+        """Deal with hosting devices unassigned from this config agent."""
+        try:
+            if payload['hosting_device_ids']:
+                #TODO(hareeshp): implement unassignment of hosting devices
+                pass
+        except KeyError as e:
+            LOG.error(_LE("Invalid payload format for received RPC message "
+                          "hosting_devices_unassigned_from_cfg_agent`. Error "
+                          "is %(error)s. Payload is %(payload)s"),
+                      {'error': e, 'payload': payload})
 
     def hosting_devices_removed(self, context, payload):
         """Deal with hosting device removed RPC message."""
@@ -250,9 +335,30 @@ class CiscoCfgAgent(manager.Manager):
                     self.process_services(removed_devices_info=payload)
         except KeyError as e:
             LOG.error(_LE("Invalid payload format for received RPC message "
-                        "`hosting_devices_removed`. Error is %(error)s. "
-                        "Payload is %(payload)s"),
-                      {'error': e, 'payload': payload})
+                          "hosting_devices_removed`. Error is %(error)s. "
+                          "Payload is %(payload)s"), {'error': e,
+                                                      'payload': payload})
+
+    def get_assigned_hosting_devices(self):
+        context = n_context.get_admin_context_without_session()
+        res = self.devmgr_rpc.get_hosting_devices_for_agent(context)
+        return res
+
+    def get_hosting_device_configuration(self, context, payload):
+        LOG.debug('Processing request to fetching running config')
+        hd_id = payload['hosting_device_id']
+        svc_helper = self.routing_service_helper
+        if hd_id and svc_helper:
+            LOG.debug('Fetching running config for %s' % hd_id)
+            drv = svc_helper.driver_manager.get_driver_for_hosting_device(
+                hd_id)
+            rc = drv.get_configuration()
+            if rc:
+                LOG.debug('Fetched %(chars)d characters long running config '
+                          'for %(hd_id)s' % {'chars': len(rc), 'hd_id': hd_id})
+                return rc
+        LOG.debug('Unable to get running config')
+        return
 
 
 class CiscoCfgAgentWithStateReport(CiscoCfgAgent):
@@ -266,16 +372,19 @@ class CiscoCfgAgentWithStateReport(CiscoCfgAgent):
             'configurations': {},
             'start_flag': True,
             'agent_type': c_constants.AGENT_TYPE_CFG}
-        report_interval = cfg.CONF.AGENT.report_interval
         self.use_call = True
         self._initialize_rpc(host)
         self._agent_registration()
         super(CiscoCfgAgentWithStateReport, self).__init__(host=host,
                                                            conf=conf)
-        if report_interval:
+
+        self.report_iteration = self.conf.cfg_agent.report_iteration
+        keepalive_interval = self.conf.cfg_agent.keepalive_interval
+        if keepalive_interval:
             self.heartbeat = loopingcall.FixedIntervalLoopingCall(
                 self._report_state)
-            self.heartbeat.start(interval=report_interval)
+            self.heartbeat.start(interval=keepalive_interval)
+            self.keepalive_iteration = 0
 
     def _agent_registration(self):
         """Register this agent with the server.
@@ -288,13 +397,13 @@ class CiscoCfgAgentWithStateReport(CiscoCfgAgent):
         failure to register after the required number of attempts,
         the agent stops itself.
         """
-        for attempts in xrange(MAX_REGISTRATION_ATTEMPTS):
+        for attempts in range(MAX_REGISTRATION_ATTEMPTS):
             context = n_context.get_admin_context_without_session()
             self.send_agent_report(self.agent_state, context)
             res = self.devmgr_rpc.register_for_duty(context)
             if res is True:
                 LOG.info(_LI("[Agent registration] Agent successfully "
-                           "registered"))
+                             "registered"))
                 return
             elif res is False:
                 LOG.warning(_LW("[Agent registration] Neutron server said "
@@ -307,29 +416,46 @@ class CiscoCfgAgentWithStateReport(CiscoCfgAgent):
                               "Exiting!"))
                 raise SystemExit("Cfg Agent exiting")
         LOG.error(_LE("[Agent registration] %d unsuccessful registration "
-                    "attempts. Exiting!"), MAX_REGISTRATION_ATTEMPTS)
+                      "attempts. Exiting!"), MAX_REGISTRATION_ATTEMPTS)
         raise SystemExit("Cfg Agent exiting")
 
     def _report_state(self):
         """Report state to the plugin.
 
-        This task run every `report_interval` period.
+        This task run every `keepalive_interval` period.
         Collects, creates and sends a summary of the services currently
         managed by this agent. Data is collected from the service helper(s).
         Refer the `configurations` dict for the parameters reported.
         :return: None
         """
         LOG.debug("Report state task started")
+        self.keepalive_iteration += 1
+        if self.keepalive_iteration == self.report_iteration:
+            self._prepare_full_report_data()
+            self.keepalive_iteration = 0
+            LOG.debug("State report: %s", pprint.pformat(self.agent_state))
+        else:
+            self.agent_state.pop('configurations', None)
+            self.agent_state['local_time'] = str(timeutils.utcnow())
+            LOG.debug("State report: %s", self.agent_state)
+        self.send_agent_report(self.agent_state, self.context)
+
+    def _prepare_full_report_data(self):
         configurations = {}
+        service_agents = []
+        self.agent_state['configurations'] = configurations
         if self.routing_service_helper:
+            service_agents.append(c_constants.AGENT_TYPE_L3_CFG)
             configurations = self.routing_service_helper.collect_state(
                 self.agent_state['configurations'])
         non_responding = self._dev_status.get_backlogged_hosting_devices_info()
+        monitored_hosting_devices = (self._dev_status.
+                                     get_monitored_hosting_devices_info())
         configurations['non_responding_hosting_devices'] = non_responding
+        configurations['monitored_hosting_devices'] = monitored_hosting_devices
+        configurations['service_agents'] = service_agents
         self.agent_state['configurations'] = configurations
         self.agent_state['local_time'] = str(timeutils.utcnow())
-        LOG.debug("State report data: %s", pprint.pformat(self.agent_state))
-        self.send_agent_report(self.agent_state, self.context)
 
     def send_agent_report(self, report, context):
         """Send the agent report via RPC."""
@@ -341,7 +467,7 @@ class CiscoCfgAgentWithStateReport(CiscoCfgAgent):
         except AttributeError:
             # This means the server does not support report_state
             LOG.warning(_LW("Neutron server does not support state report. "
-                       "State report for this agent will be disabled."))
+                            "State report for this agent will be disabled."))
             self.heartbeat.stop()
             return
         except Exception:
@@ -351,7 +477,6 @@ class CiscoCfgAgentWithStateReport(CiscoCfgAgent):
 def main(manager='networking_cisco.plugins.cisco.cfg_agent.'
                  'cfg_agent.CiscoCfgAgentWithStateReport'):
     conf = cfg.CONF
-    conf.register_opts(CiscoCfgAgent.OPTS, "cfg_agent")
     config.register_agent_state_opts_helper(conf)
     config.register_root_helper(conf)
     conf.register_opts(interface.OPTS)

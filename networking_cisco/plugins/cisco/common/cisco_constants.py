@@ -12,107 +12,89 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+# Constants related to device manager
+# ===================================
+# Service type for device manager plugin
+DEVICE_MANAGER = "DEVICE_MANAGER"
 
-# Attachment attributes
-INSTANCE_ID = 'instance_id'
-TENANT_ID = 'tenant_id'
-TENANT_NAME = 'tenant_name'
-HOST_NAME = 'host_name'
+# RPC topic for device manager
+DEVICE_MANAGER_PLUGIN = 'n-devmgr-plugin'
 
-# Network attributes
-NET_ID = 'id'
-NET_NAME = 'name'
-NET_VLAN_ID = 'vlan_id'
-NET_VLAN_NAME = 'vlan_name'
-NET_PORTS = 'ports'
-
-CREDENTIAL_ID = 'credential_id'
-CREDENTIAL_NAME = 'credential_name'
-CREDENTIAL_USERNAME = 'user_name'
-CREDENTIAL_PASSWORD = 'password'
-CREDENTIAL_TYPE = 'type'
-MASKED_PASSWORD = '********'
-
-USERNAME = 'username'
-PASSWORD = 'password'
-
-LOGGER_COMPONENT_NAME = "cisco_plugin"
-
-VSWITCH_PLUGIN = 'vswitch_plugin'
-
-DEVICE_IP = 'device_ip'
-
-NETWORK_ADMIN = 'network_admin'
-
-NETWORK = 'network'
-PORT = 'port'
-BASE_PLUGIN_REF = 'base_plugin_ref'
-CONTEXT = 'context'
-SUBNET = 'subnet'
-
-#### N1Kv CONSTANTS
-# Special vlan_id value in n1kv_vlan_allocations table indicating flat network
-FLAT_VLAN_ID = -1
-
-# Topic for tunnel notifications between the plugin and agent
-TUNNEL = 'tunnel'
-
-# Maximum VXLAN range configurable for one network profile.
-MAX_VXLAN_RANGE = 1000000
-
-# Values for network_type
-NETWORK_TYPE_FLAT = 'flat'
-NETWORK_TYPE_VLAN = 'vlan'
-NETWORK_TYPE_VXLAN = 'vxlan'
-NETWORK_TYPE_LOCAL = 'local'
-NETWORK_TYPE_NONE = 'none'
-NETWORK_TYPE_TRUNK = 'trunk'
-NETWORK_TYPE_MULTI_SEGMENT = 'multi-segment'
-
-# Values for network sub_type
-NETWORK_TYPE_OVERLAY = 'overlay'
-NETWORK_SUBTYPE_NATIVE_VXLAN = 'native_vxlan'
-NETWORK_SUBTYPE_TRUNK_VLAN = NETWORK_TYPE_VLAN
-NETWORK_SUBTYPE_TRUNK_VXLAN = NETWORK_TYPE_OVERLAY
-
-# Prefix for VM Network name
-VM_NETWORK_NAME_PREFIX = 'vmn_'
-
-SET = 'set'
-INSTANCE = 'instance'
-PROPERTIES = 'properties'
-NAME = 'name'
-ID = 'id'
-POLICY = 'policy'
-TENANT_ID_NOT_SET = 'TENANT_ID_NOT_SET'
-ENCAPSULATIONS = 'encapsulations'
-STATE = 'state'
-ONLINE = 'online'
-MAPPINGS = 'mappings'
-MAPPING = 'mapping'
-SEGMENTS = 'segments'
-SEGMENT = 'segment'
-BRIDGE_DOMAIN_SUFFIX = '_bd'
-LOGICAL_NETWORK_SUFFIX = '_log_net'
-ENCAPSULATION_PROFILE_SUFFIX = '_profile'
-
-UUID_LENGTH = 36
-
-# N1KV vlan and vxlan segment range
-N1KV_VLAN_RESERVED_MIN = 3968
-N1KV_VLAN_RESERVED_MAX = 4047
-N1KV_VXLAN_MIN = 4096
-N1KV_VXLAN_MAX = 16000000
 
 # Type and topic for Cisco cfg agent
 # ==================================
 AGENT_TYPE_CFG = 'Cisco cfg agent'
+AGENT_TYPE_L3_CFG = 'Cisco l3 cfg agent'
 
 # Topic for Cisco configuration agent
 CFG_AGENT = 'cisco_cfg_agent'
 # Topic for routing service helper in Cisco configuration agent
 CFG_AGENT_L3_ROUTING = 'cisco_cfg_agent_l3_routing'
 
+# Device manager and (hosting) devices
+# ====================================
+# Default name of hosting device template for network nodes
+# hosting Linux network namespace-based Neutron routers.
+NETWORK_NODE_TEMPLATE = 'NetworkNode_template'
+
+# Statuses of hosting devices
+# ===========================
+# Active means the hosting device is up, responds to pings and is configurable
+HD_ACTIVE = 'ACTIVE'
+# Not responding means that hosting device does not respond to pings but has
+# not yet been determined to be dead or faulty
+HD_NOT_RESPONDING = 'NOT RESPONDING'
+# Error means that hosting device has been determined to be faulty, meaning it
+# may respond to pings but other symptoms indicate it is faulty
+HD_ERROR = 'ERROR'
+# Dead means that hosting device has been determined to be dead in that it
+# does not respond to pings even given multiple, repeated attempts
+HD_DEAD = 'DEAD'
+
+
+# Routing service
+# ==============
+# Default name of router type for Neutron routers implemented
+# as Linux network namespaces in network nodes.
+NAMESPACE_ROUTER_TYPE = 'Namespace_Neutron_router'
+
+# Default name of router type for Neutron routers implemented
+# as VRFs inside a CSR1kv VM instance.
+CSR1KV_ROUTER_TYPE = 'CSR1kv_router'
+
+# Default name of router type for Neutron routers implemented
+# as VRFs inside a ASR1k physical device.
+ASR1K_ROUTER_TYPE = 'ASR1k_router'
+
+# Router roles
+ROUTER_ROLE_GLOBAL = 'Global'
+ROUTER_ROLE_LOGICAL_GLOBAL = 'Logical-Global'
+ROUTER_ROLE_HA_REDUNDANCY = 'HA-Redundancy'
+ALLOWED_ROUTER_ROLES = [ROUTER_ROLE_GLOBAL, ROUTER_ROLE_LOGICAL_GLOBAL,
+                        ROUTER_ROLE_HA_REDUNDANCY]
+
+# Prefix of name given to global routers
+ROUTER_ROLE_NAME_PREFIX = ROUTER_ROLE_GLOBAL + '-router'
+LOGICAL_ROUTER_ROLE_NAME = ROUTER_ROLE_LOGICAL_GLOBAL + '-router'
+# Number of characters of hosting device id added to role name
+ROLE_ID_LEN = 17
+
+# The status of a Neutron Router created using the
+# Cisco service plugin is one of the following:
+# Created but not scheduled nor deployed
+ROUTER_PENDING_CREATE = "PENDING_CREATE"
+#  Scheduling in progress
+ROUTER_SCHEDULING = 'SCHEDULING'
+# Backlogged due to unsuccessful scheduling attempt
+ROUTER_BACKLOGGED = 'BACKLOGGED'
+# Backlogged due to non-ready hosting device (e.g., still booting)
+ROUTER_WAITING_HOST = 'AWAITING_HOST'
+# Deployed and configured
+ROUTER_ACTIVE = "ACTIVE"
+# Deletion in progress (by cfg agent)
+ROUTER_PENDING_DELETE = "PENDING_DELETE"
+# Some db states in flight so all info is not yet available
+ROUTER_INFO_INCOMPLETE = "INFO_INCOMPLETE"
 # Values for network profile fields
 ADD_TENANTS = 'add_tenants'
 REMOVE_TENANTS = 'remove_tenants'

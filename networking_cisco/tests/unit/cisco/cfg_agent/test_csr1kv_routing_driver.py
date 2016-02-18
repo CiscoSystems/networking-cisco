@@ -16,9 +16,9 @@ import sys
 
 import mock
 import netaddr
+from oslo_utils import uuidutils
 
 from neutron.common import constants as l3_constants
-from neutron.openstack.common import uuidutils
 from neutron.tests import base
 
 from networking_cisco.plugins.cisco.cfg_agent.device_drivers.csr1kv import (
@@ -44,6 +44,7 @@ class TestCSR1kvRouting(base.BaseTestCase):
                          'protocol_port': 22,
                          'credentials': {"username": "stack",
                                          "password": "cisco"},
+                         'timeout': None
                          }
         self.driver = csr_driver.CSR1kvRoutingDriver(
             **device_params)
@@ -62,8 +63,8 @@ class TestCSR1kvRouting(base.BaseTestCase):
                            'network_id': _uuid(),
                            'fixed_ips': [{'ip_address': self.ex_gw_ip,
                                           'subnet_id': _uuid()}],
-                           'subnet': {'cidr': self.ex_gw_cidr,
-                                      'gateway_ip': self.ex_gw_gateway_ip},
+                           'subnets': [{'cidr': self.ex_gw_cidr,
+                                      'gateway_ip': self.ex_gw_gateway_ip}],
                            'ip_cidr': self.ex_gw_cidr,
                            'mac_address': 'ca:fe:de:ad:be:ef',
                            'hosting_info': {'segmentation_id': self.ex_gw_vlan,
@@ -281,3 +282,8 @@ class TestCSR1kvRouting(base.BaseTestCase):
             snippets.REMOVE_DYN_SRC_TRL_INTFC, (acl_no, ext_interface,
                                                 self.vrf))
         self.assert_edit_running_config(snippets.REMOVE_ACL, acl_no)
+
+    def test_get_configuration(self):
+        self.driver._get_running_config = mock.MagicMock()
+        self.driver.get_configuration()
+        self.driver._get_running_config.assert_called_once_with(split=False)

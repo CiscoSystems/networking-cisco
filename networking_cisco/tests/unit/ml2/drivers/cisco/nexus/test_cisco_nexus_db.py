@@ -16,6 +16,7 @@
 import collections
 import testtools
 
+import networking_cisco.tests.unit.cisco.test_setup_monkeypatch  # noqa
 from networking_cisco.plugins.ml2.drivers.cisco.nexus import exceptions
 from networking_cisco.plugins.ml2.drivers.cisco.nexus import nexus_db_v2
 

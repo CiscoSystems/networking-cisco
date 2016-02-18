@@ -15,7 +15,11 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import os.path
+
 from oslotest import base
+
+ROOTDIR = os.path.dirname(__file__)
 
 
 class TestCase(base.BaseTestCase):

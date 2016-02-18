@@ -51,7 +51,16 @@ class DeviceDriverManager(object):
             return self._drivers[resource_id]
         except KeyError:
             with excutils.save_and_reraise_exception(reraise=False):
-                raise cfg_exceptions.DriverNotFound(id=resource_id)
+                raise cfg_exceptions.DriverNotFound(resource='router',
+                                                    id=resource_id)
+
+    def get_driver_for_hosting_device(self, hd_id):
+        try:
+            return self._hosting_device_routing_drivers_binding[hd_id]
+        except KeyError:
+            with excutils.save_and_reraise_exception(reraise=False):
+                raise cfg_exceptions.DriverNotFound(resource='hosting device',
+                                                    id=hd_id)
 
     def set_driver(self, resource):
         """Set the driver for a neutron resource.
@@ -70,24 +79,27 @@ class DeviceDriverManager(object):
             if hd_id in self._hosting_device_routing_drivers_binding:
                 driver = self._hosting_device_routing_drivers_binding[hd_id]
                 self._drivers[resource_id] = driver
+                return driver
             else:
                 driver_class = resource['router_type']['cfg_agent_driver']
-                driver = importutils.import_object(driver_class,
-                                                   **hosting_device)
-                self._hosting_device_routing_drivers_binding[hd_id] = driver
-                self._drivers[resource_id] = driver
-            return driver
-        except ImportError:
-            with excutils.save_and_reraise_exception(reraise=False):
-                LOG.exception(_LE("Error loading cfg agent driver %(driver)s "
-                                "for hosting device template "
-                                "%(t_name)s(%(t_id)s)"),
-                              {'driver': driver_class, 't_id': hd_id,
-                               't_name': resource['name']})
-                raise cfg_exceptions.DriverNotExist(driver=driver_class)
+                try:
+                    driver = importutils.import_object(driver_class,
+                                                       **hosting_device)
+                    self._hosting_device_routing_drivers_binding[hd_id] = (
+                        driver)
+                    self._drivers[resource_id] = driver
+                    return driver
+                except ImportError:
+                    with excutils.save_and_reraise_exception(reraise=False):
+                        LOG.exception(_LE(
+                            "Error loading cfg agent driver %(driver)s for "
+                            "hosting device %(t_id)s"),
+                            {'driver': driver_class, 't_id': hd_id})
+                        raise cfg_exceptions.DriverNotExist(
+                            driver=driver_class)
         except KeyError as e:
             with excutils.save_and_reraise_exception(reraise=False):
-                raise cfg_exceptions.DriverNotSetForMissingParameter(e)
+                raise cfg_exceptions.DriverNotSetForMissingParameter(p=e)
 
     def remove_driver(self, resource_id):
         """Remove driver associated to a particular resource."""

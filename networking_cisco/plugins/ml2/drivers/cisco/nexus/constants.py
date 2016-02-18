@@ -40,3 +40,9 @@ NEXUS_3K = 3
 NEXUS_5K = 5
 NEXUS_7K = 7
 NEXUS_9K = 9
+
+MAX_NEXUS_SSH_SESSIONS = 8
+
+REPLAY_FAILURES = '_replay_failures'
+FAIL_CONTACT = '_contact'
+FAIL_CONFIG = '_config'
