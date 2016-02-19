@@ -696,6 +696,7 @@ def get_version():
         LOG.warn(_LW("Failed to obtain CPNR version number"))
     except StandardError:
         LOG.warn(_LW("Failed to parse CPNR version number"))
+    LOG.debug("CPNR version: %s", version)
     return version
 
 
