@@ -12,25 +12,26 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import uuid
-import netaddr
-import time
 from itertools import groupby
+import netaddr
 from operator import itemgetter
+import time
+import uuid
 
 from oslo_config import cfg
-
-from neutron.common import constants
 from oslo_log import log as logging
+
+from networking_cisco.plugins.cisco.cpnr import cpnr_client
+from networking_cisco.plugins.cisco.cpnr import dhcpopts
+from networking_cisco._i18n import _LE, _LW
 from neutron.agent.linux import dhcp
-from neutron.plugins.cisco.cpnr import cpnr_client
-from neutron.plugins.cisco.cpnr import dhcpopts
+from neutron.common import constants
 
 LOG = logging.getLogger(__name__)
 RELOAD_TIMEOUT = 120
 
 
-class Network:
+class Network(object):
 
     def __init__(self):
         self.vpn = Vpn()
@@ -127,10 +128,10 @@ class Network:
                 if subnet.enable_dhcp and subnet.ip_version == 4]
 
 
-class Vpn:
+class Vpn(object):
 
-    def __init__(self, data={}):
-        self.data = data
+    def __init__(self, data=None):
+        self.data = data or {}
 
     @classmethod
     def from_neutron(cls, network):
@@ -174,10 +175,10 @@ class Vpn:
         pnr.delete_vpn(self.data['name'])
 
 
-class Scope:
+class Scope(object):
 
-    def __init__(self, data={}):
-        self.data = data
+    def __init__(self, data=None):
+        self.data = data or {}
 
     @classmethod
     def from_neutron(cls, network, subnet):
@@ -224,8 +225,8 @@ class Scope:
         # Group all consecutive addresses and create ranges
         ip_ranges = []
         for key, group in groupby(enumerate(sorted(ip_addrs_int)),
-                                  lambda (index, item): index - item):
-            ip_range = map(itemgetter(1), group)
+                                  lambda item: item[0] - item[1]):
+            ip_range = list(map(itemgetter(1), group))
             min_range = str(netaddr.IPAddress(ip_range[0]))
             max_range = str(netaddr.IPAddress(ip_range[-1]))
             ip_ranges.append((min_range, max_range))
@@ -249,10 +250,10 @@ class Scope:
         pnr.delete_scope(self.data['name'])
 
 
-class ClientEntry:
+class ClientEntry(object):
 
-    def __init__(self, data={}, vpnid='0'):
-        self.data = data
+    def __init__(self, data=None, vpnid='0'):
+        self.data = data or {}
         self.vpnid = vpnid
 
     @classmethod
@@ -293,7 +294,7 @@ class ClientEntry:
         netid = uuid.UUID(netid)
         vpnid = netid.hex[-14:-8] + ':' + netid.hex[-8:]
         vpnid = vpnid.replace(':', '')
-        vpnid = ':'.join(vpnid[i:i+2] for i in range(0, len(vpnid), 2))
+        vpnid = ':'.join(vpnid[i:i + 2] for i in range(0, len(vpnid), 2))
         return '01:' + vpnid + ":" + macaddr
 
     def create(self):
@@ -313,10 +314,10 @@ class ClientEntry:
             pnr.release_address(addr, self.vpnid)
 
 
-class Policy:
+class Policy(object):
 
-    def __init__(self, data={}):
-        self.data = data
+    def __init__(self, data=None):
+        self.data = data or {}
 
     @classmethod
     def from_neutron_subnet(cls, network, subnet):
@@ -375,7 +376,7 @@ class Policy:
         if isolated_subnets[subnet.id] and \
            cfg.CONF.enable_isolated_metadata and \
            subnet.ip_version == 4:
-            class HostRoute:
+            class HostRoute(object):
                 pass
             for ip in cls._iter_dhcp_ips(network, subnet):
                 hr = HostRoute()
@@ -386,8 +387,8 @@ class Policy:
         encoded_routes = []
         for hr in host_routes:
             (subnet, _, mask) = hr.destination.partition("/")
-            sigbytes = ((int(mask)-1)/8)+1
-            prefix = '.'.join(subnet.split('.')[:sigbytes])
+            sigbytes = ((int(mask) - 1) / 8) + 1
+            prefix = '.'.join(subnet.split('.')[:int(sigbytes)])
             destination = mask + '.' + prefix
             encoded_routes.append(destination + ' ' + hr.nexthop)
         return ','.join(encoded_routes)
@@ -403,10 +404,10 @@ class Policy:
                 yield ip.ip_address
 
 
-class View:
+class View(object):
 
-    def __init__(self, data={}):
-        self.data = data
+    def __init__(self, data=None):
+        self.data = data or {}
 
     @classmethod
     def from_neutron(cls, network):
@@ -442,10 +443,10 @@ class View:
         pnr.delete_dns_view(self.data['name'])
 
 
-class ForwardZone:
+class ForwardZone(object):
 
-    def __init__(self, data={}):
-        self.data = data
+    def __init__(self, data=None):
+        self.data = data or {}
 
     @classmethod
     def from_neutron(cls, network):
@@ -490,10 +491,10 @@ class ForwardZone:
         pnr.delete_ccm_zone(self.data['origin'], viewid=self.data['viewId'])
 
 
-class ReverseZone:
+class ReverseZone(object):
 
-    def __init__(self, data={}):
-        self.data = data
+    def __init__(self, data=None):
+        self.data = data or {}
 
     @classmethod
     def from_neutron(cls, network, subnet):
@@ -535,10 +536,10 @@ class ReverseZone:
                                     viewid=self.data['viewId'])
 
 
-class Host:
+class Host(object):
 
-    def __init__(self, data={}, viewid=0):
-        self.data = data
+    def __init__(self, data=None, viewid=0):
+        self.data = data or {}
         self.viewid = viewid
 
     @classmethod
@@ -626,7 +627,7 @@ def configure_pnr():
         pnr.update_dns_forwarder('%%32%45', dns_forwarder)
         pnr.update_ccm_zone('%%32%45', dns_zone)
     except cpnr_client.CpnrException:
-        LOG.error(_("Failed to configure CPNR DHCP Server and Client Class"))
+        LOG.error(_LE("Failed to configure CPNR DHCP Server and Client Class"))
 
 
 def recover_networks():
@@ -634,7 +635,8 @@ def recover_networks():
     try:
         networks = _unsafe_recover_networks()
     except Exception:
-        LOG.exception(_("Failed to recover networks. CPNR may be unreachable"))
+        LOG.exception(_LE("Failed to recover networks. "
+                          "CPNR may be unreachable"))
     return networks
 
 
@@ -651,7 +653,7 @@ def _unsafe_recover_networks():
                 for scope in pnr.get_scopes(vpn['id']):
                     net.scopes[scope['name']] = Scope.from_pnr(scope)
             except Exception:
-                LOG.exception(_('Failed to read back scopes for '
+                LOG.exception(_LE('Failed to read back scopes for '
                                 'network %s'), netid)
         for ce in pnr.get_client_entries():
             (netid, _, portid) = ce['userDefined'].partition('+')
@@ -676,10 +678,11 @@ def _unsafe_recover_networks():
                 for host in pnr.get_ccm_hosts(viewid=viewid, zoneid=domain):
                     net.hosts[host['name']] = Host.from_pnr(host, viewid)
             except Exception:
-                LOG.exception(_('Failed to read back PNR data for '
-                                'network %s view %s'), netid, viewid)
+                LOG.exception(_LE('Failed to read back PNR data for '
+                              'network %(network)s view %(view)s'),
+                              {'network': netid, 'view': viewid})
     except Exception:
-        LOG.exception(_('Failed to recover networks from PNR'))
+        LOG.exception(_LE('Failed to recover networks from PNR'))
     return networks
 
 
@@ -690,9 +693,9 @@ def get_version():
         verstr = pnr.get_version()
         version = verstr.split()[2]
     except cpnr_client.CpnrException:
-        LOG.warn("Failed to obtain CPNR version number")
+        LOG.warn(_LW("Failed to obtain CPNR version number"))
     except StandardError:
-        LOG.warn("Failed to parse CPNR version number")
+        LOG.warn(_LW("Failed to parse CPNR version number"))
     return version
 
 
@@ -711,8 +714,8 @@ def reload_server(timeout=RELOAD_TIMEOUT):
                'name' in pnr.get_dhcp_server() and \
                'name' in pnr.get_dns_server():
                 return
-        except:
+        except Exception:
             time.sleep(1)
             continue
-    LOG.warning(_("PNR timed out after reload, "
+    LOG.warning(_LW("PNR timed out after reload, "
                   "timeout: %s seconds"), timeout)

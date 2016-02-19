@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-#
 # Copyright 2015 Cisco Systems, Inc.  All rights reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -15,11 +13,16 @@
 #    under the License.
 #
 
-from dhcp_relay import DhcpRelayAgent, DhcpPacket, cfg, OPTS
-import mock
-import unittest
-import socket
 from binascii import hexlify
+import mock
+import socket
+
+from networking_cisco.plugins.cisco.cpnr.cpnr_client import UnexpectedError
+from networking_cisco.plugins.cisco.cpnr.dhcp_relay import cfg
+from networking_cisco.plugins.cisco.cpnr.dhcp_relay import DhcpPacket
+from networking_cisco.plugins.cisco.cpnr.dhcp_relay import DhcpRelayAgent
+from networking_cisco.plugins.cisco.cpnr.dhcp_relay import OPTS
+import unittest
 
 
 class TestDhcpRelayAgent(unittest.TestCase):
@@ -36,7 +39,7 @@ class TestDhcpRelayAgent(unittest.TestCase):
     def test_client_network_relay(self):
         pass
 
-    @mock.patch('dhcp_relay.netns')
+    @mock.patch('networking_cisco.plugins.cisco.cpnr.dhcp_relay.netns')
     @mock.patch('socket.socket')
     def test_open_dhcp_ext_socket(self, mock_socket, mock_netns):
         cfg.CONF.register_opts(OPTS, 'cisco_pnr')
@@ -55,12 +58,12 @@ class TestDhcpRelayAgent(unittest.TestCase):
         )
 
         # check exception thrown if no interfaces
-        with self.assertRaises(Exception) as context:
+        with self.assertRaises(UnexpectedError):
             mock_netns.iflist.return_value = []
             sock, addr = relay._open_dhcp_ext_socket()
 
         # check exception thrown if no matching interfaces
-        with self.assertRaises(Exception) as context:
+        with self.assertRaises(UnexpectedError):
             mock_netns.iflist.return_value = []
             mock_netns.iflist.return_value.append(('eth1', '10.0.1.3',
                                                    '255.255.255.0'))
@@ -73,7 +76,7 @@ class TestDhcpRelayAgent(unittest.TestCase):
                                                '255.0.0.0'))
         sock, addr = relay._open_dhcp_ext_socket()
 
-    @mock.patch('dhcp_relay.netns')
+    @mock.patch('networking_cisco.plugins.cisco.cpnr.dhcp_relay.netns')
     @mock.patch('socket.socket')
     def test_open_dhcp_int_socket(self, mock_socket, mock_netns):
         cfg.CONF.register_opts(OPTS, 'cisco_pnr')
@@ -98,7 +101,7 @@ class TestDhcpRelayAgent(unittest.TestCase):
         )
 
         # check exception thrown if no interfaces
-        with self.assertRaises(Exception) as context:
+        with self.assertRaises(UnexpectedError):
             mock_netns.iflist.return_value = []
             recv_s, send_s, addr = relay._open_dhcp_int_socket()
 
@@ -118,7 +121,8 @@ class TestDhcpPacket(unittest.TestCase):
 
     def test_parse(self):
         # DHCP packet contains relay agent option 82
-        with open('tests/unit/data/dhcp_packet.txt', 'rb') as dhcp_file:
+        with open('networking_cisco/tests/unit/cisco/'
+                  'cpnr/data/dhcp_packet.txt', 'rt') as dhcp_file:
             lines = [line.strip() for line in dhcp_file]
             data = ''.join(lines)
             buf = bytearray.fromhex(data)
@@ -126,20 +130,21 @@ class TestDhcpPacket(unittest.TestCase):
             # Test client address
             self.assertEqual(packet.get_ciaddr(), '0.0.0.0')
             # Test relay agent options
-            expected_relay_options = {152: '',
+            expected_relay_options = {152: b'',
                                       11: '10.10.1.2',
                                       5: '10.10.1.2',
-                                      151: 'a7fb1cce171a81'}
+                                      151: b'a7fb1cce171a81'}
             actual_packet_options = {code: packet.get_relay_option(code)
                                      for code in [152, 11, 5, 151]}
             self.assertEqual(actual_packet_options, expected_relay_options)
 
             # Unsuccessful case of undefined relay agent sub-options
-            with self.assertRaises(KeyError) as context:
-                value = packet.get_relay_option(220)
+            with self.assertRaises(KeyError):
+                packet.get_relay_option(220)
 
     def test_data(self):
-        with open('tests/unit/data/dhcp_packet.txt', 'rb') as dhcp_file:
+        with open('networking_cisco/tests/unit/cisco/'
+                  'cpnr/data/dhcp_packet.txt', 'rt') as dhcp_file:
             lines = [line.strip() for line in dhcp_file]
             data = ''.join(lines)
             buf = bytearray.fromhex(data)
@@ -150,17 +155,17 @@ class TestDhcpPacket(unittest.TestCase):
             self.assertNotEqual(-1, hex_data.find(hexlify(packet.ciaddr)))
             self.assertNotEqual(-1, hex_data.find(hexlify(packet.giaddr)))
 
-            expected_relay_options = {152: '',
+            expected_relay_options = {152: b'',
                                       11: '10.10.1.2',
                                       5: '10.10.1.2',
-                                      151: 'a7fb1cce171a81'}
+                                      151: b'a7fb1cce171a81'}
             # Find relay agent sub-options in data
             self.assertNotEqual(-1, hex_data.find(
                 self.get_relay_opt_hex(expected_relay_options[11])))
             self.assertNotEqual(-1, hex_data.find(
                 self.get_relay_opt_hex(expected_relay_options[5])))
             self.assertNotEqual(-1, hex_data.find(
-                "01" + expected_relay_options[151]))
+                b"01" + expected_relay_options[151]))
             self.assertNotEqual(-1, hex_data.find(
                 expected_relay_options[152]))
 

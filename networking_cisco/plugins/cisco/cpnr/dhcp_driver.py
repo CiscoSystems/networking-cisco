@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-
 # Copyright 2012 OpenStack Foundation
 # All Rights Reserved.
 #
@@ -21,16 +19,13 @@ import os
 import shutil
 import time
 
-from oslo_config import cfg
-from oslo_utils import encodeutils
-from oslo_utils import importutils
-from oslo_utils import timeutils
-from oslo_log import log as logging
+from networking_cisco.plugins.cisco.cpnr import model
+from networking_cisco._i18n import _, _LE, _LW
 from neutron.agent.linux import dhcp
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import utils
-from neutron.plugins.cisco.cpnr import model
-from neutron.plugins.cisco.cpnr import netns
+from oslo_config import cfg
+from oslo_log import log as logging
 
 LOG = logging.getLogger(__name__)
 GREENPOOL_SIZE = 10
@@ -75,6 +70,12 @@ OPTS = [
 
 ]
 cfg.CONF.register_opts(OPTS, 'cisco_pnr')
+
+_devices = {}
+_networks = {}
+_queue = eventlet.queue.LightQueue()
+_locks = {}
+last_activity = time.time()
 
 
 class RemoteServerDriver(dhcp.DhcpBase):
@@ -147,6 +148,7 @@ class RemoteServerDriver(dhcp.DhcpBase):
     @classmethod
     def existing_dhcp_networks(cls, conf):
         """Return a list of existing networks ids that we have configs for."""
+        global _devices
         return _devices.keys()
 
     @classmethod
@@ -155,10 +157,11 @@ class RemoteServerDriver(dhcp.DhcpBase):
         Creates global dict to track device names across driver invocations
         and populates based on current devices configured on the system.
         """
+
         if "_devices" in globals():
             return
+
         global _devices
-        _devices = {}
         confs_dir = os.path.abspath(os.path.normpath(cfg.CONF.dhcp_confs))
         for netid in os.listdir(confs_dir):
             conf_dir = os.path.join(confs_dir, netid)
@@ -168,23 +171,24 @@ class RemoteServerDriver(dhcp.DhcpBase):
                     ifname = f.read()
                 _devices[netid] = ifname
             except IOError:
-                LOG.error(_('Unable to read interface file: %s'),
+                LOG.error(_LE('Unable to read interface file: %s'),
                           intf_filename)
-            LOG.debug(_('Recovered device %s for network %s'),
+            LOG.debug("Recovered device %s for network %s'",
                       ifname, netid)
 
     def update_device(self, disabled=False):
         try:
             self._unsafe_update_device(disabled)
         except Exception:
-            LOG.exception(_("Failed to update device for network: %s"),
+            LOG.exception(_LE("Failed to update device for network: %s"),
                           self.network.id)
 
     def _unsafe_update_device(self, disabled=False):
+        global _devices
         if self.network.id not in _devices:
             if disabled:
                 return
-            LOG.debug(_("Setting up device for network: %s"),
+            LOG.debug("Setting up device for network: %s",
                       self.network.id)
             ifname = self.device_manager.setup(self.network)
             _devices[self.network.id] = ifname
@@ -199,12 +203,13 @@ class RemoteServerDriver(dhcp.DhcpBase):
             try:
                 self.device_manager.update(self.network, ifname)
             except Exception:
-                LOG.error(_("Failed to update device for network: %s"),
+                LOG.error(_LE("Failed to update device for network: %s"),
                           self.network.id)
                 del _devices[self.network.id]
                 self._unsafe_update_device()
 
     def _write_intf_file(self):
+        global _devices
         confs_dir = os.path.abspath(os.path.normpath(self.conf.dhcp_confs))
         conf_dir = os.path.join(confs_dir, self.network.id)
         if not os.path.isdir(conf_dir):
@@ -224,6 +229,19 @@ class RemoteServerDriver(dhcp.DhcpBase):
     def update_server(self, disabled=False):
         pass
 
+    @classmethod
+    def recover_networks(cls):
+        """
+        Creates global dict to track network objects across driver
+        invocations and populates using the model module.
+        """
+
+        if "_networks" in globals():
+            return
+
+        global _networks
+        _networks = model.recover_networks()
+
 
 class SimpleCpnrDriver(RemoteServerDriver):
 
@@ -242,35 +260,25 @@ class SimpleCpnrDriver(RemoteServerDriver):
         cls.recover_networks()
         ver = model.get_version()
         if ver < cls.MIN_VERSION:
-            LOG.warn(_("CPNR version does not meet minimum requirements, "
-                       "expected: %f, actual: %f"),
-                     cls.MIN_VERSION, ver)
+            LOG.warn(_LW("CPNR version does not meet minimum requirements, "
+                     "expected: %(ever)f, actual: %(rver)f"),
+                     {'ever': cls.MIN_VERSION, 'rver': ver})
         return ver
 
     @classmethod
     def existing_dhcp_networks(cls, conf):
         """Return a list of existing networks ids that we have configs for."""
+        global _networks
         sup = super(SimpleCpnrDriver, cls)
         superkeys = sup.existing_dhcp_networks(conf)
         return set(_networks.keys()) & set(superkeys)
-
-    @classmethod
-    def recover_networks(cls):
-        """
-        Creates global dict to track network objects across driver
-        invocations and populates using the model module.
-        """
-        if "_networks" in globals():
-            return
-        global _networks
-        _networks = model.recover_networks()
 
     def update_server(self, disabled=False):
         try:
             self._unsafe_update_server(disabled)
             model.reload_server()
         except Exception:
-            LOG.exception(_("Failed to update PNR for network: %s"),
+            LOG.exception(_LE("Failed to update PNR for network: %s"),
                           self.network.id)
 
     def _unsafe_update_server(self, disabled=False):
@@ -321,8 +329,8 @@ class CpnrDriver(SimpleCpnrDriver):
                                      eventlet.semaphore.Semaphore())
             with lock:
                 self._unsafe_update_server(disabled)
-        except Exception as e:
-            LOG.exception(_('Failed to update PNR for network: %s'),
+        except Exception:
+            LOG.exception(_LE('Failed to update PNR for network: %s'),
                           self.network.id)
 
     def update_device(self, disabled=False):
@@ -331,8 +339,8 @@ class CpnrDriver(SimpleCpnrDriver):
                                      eventlet.semaphore.Semaphore())
             with lock:
                 self._unsafe_update_device(disabled)
-        except Exception as e:
-            LOG.exception(_("Failed to update device for network: %s"),
+        except Exception:
+            LOG.exception(_LE("Failed to update device for network: %s"),
                           self.network.id)
 
     @classmethod
@@ -370,11 +378,13 @@ class CpnrDriver(SimpleCpnrDriver):
         global last_activity
         while True:
             eventlet.sleep(cfg.CONF.cisco_pnr.sync_interval)
-            if time.time() - last_activity < cfg.CONF.cisco_pnr.sync_interval:
-                continue
+            if ((time.time() - last_activity) <
+               cfg.CONF.cisco_pnr.sync_interval):
+                    continue
             pnr_networks = model.recover_networks()
             # Delete stale VPNs in CPNR
-            deleted_keys = set(pnr_networks.keys()) - set(_networks.keys())
+            deleted_keys = set(pnr_networks.keys()) - set(
+                               _networks.keys())
             for key in deleted_keys:
                 deleted = pnr_networks[key]
                 try:
@@ -382,12 +392,13 @@ class CpnrDriver(SimpleCpnrDriver):
                                              eventlet.semaphore.Semaphore())
                     with lock:
                         deleted.delete()
-                except Exception as e:
-                    LOG.exception(_('Failed to delete network %s in CPNR '
+                except Exception:
+                    LOG.exception(_LE('Failed to delete network %s in CPNR '
                                     'during sync:'), key)
 
             # Create VPNs in CPNR if not already present
-            created_keys = set(_networks.keys()) - set(pnr_networks.keys())
+            created_keys = set(_networks.keys()) - set(
+                               pnr_networks.keys())
             for key in created_keys:
                 created = _networks[key]
                 try:
@@ -395,12 +406,13 @@ class CpnrDriver(SimpleCpnrDriver):
                                              eventlet.semaphore.Semaphore())
                     with lock:
                         created.create()
-                except Exception as e:
-                    LOG.exception(_('Failed to create network %s in CPNR '
+                except Exception:
+                    LOG.exception(_LE('Failed to create network %s in CPNR '
                                     'during sync'), key)
 
             # Update VPNs in CPNR if normal update has been unsuccessful
-            updated_keys = set(_networks.keys()) & set(pnr_networks.keys())
+            updated_keys = set(_networks.keys()) & set(
+                               pnr_networks.keys())
             for key in updated_keys:
                 updated = _networks[key]
                 try:
@@ -408,6 +420,6 @@ class CpnrDriver(SimpleCpnrDriver):
                                              eventlet.semaphore.Semaphore())
                     with lock:
                         pnr_networks[key].update(updated)
-                except Exception as e:
-                    LOG.exception(_('Failed to update network %s in CPNR '
+                except Exception:
+                    LOG.exception(_LE('Failed to update network %s in CPNR '
                                     'during sync'), key)

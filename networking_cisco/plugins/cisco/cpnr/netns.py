@@ -1,4 +1,16 @@
-#!/usr/bin/env python
+# Copyright 2016 Cisco Systems, Inc.  All rights reserved.
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
 
 """
 netns - context manager for network namespaces
@@ -8,6 +20,8 @@ import ctypes
 import os
 import resource
 import subprocess
+
+from networking_cisco._i18n import _LW
 from oslo_log import log as logging
 
 LOG = logging.getLogger(__name__)
@@ -17,7 +31,7 @@ _libc = ctypes.CDLL('libc.so.6')
 NETNS_DIR = "/var/run/netns/"
 
 
-class Namespace:
+class Namespace(object):
     def __init__(self, name):
         self.parent_fd = open("/proc/self/ns/net")
         self.parent_fileno = self.parent_fd.fileno()
@@ -31,8 +45,8 @@ class Namespace:
         _libc.setns(self.parent_fileno, 0)
         try:
             self.target_fd.close()
-        except:
-            LOG.warning(_("Failed to close target_fd: %s"), target_fd)
+        except Exception:
+            LOG.warning(_LW("Failed to close target_fd: %s"), self.target_fd)
             pass
         self.parent_fd.close()
 
@@ -44,13 +58,13 @@ def nslist():
 def iflist(ignore=set()):
     interfaces = []
     for line in subprocess.check_output(['ip', 'addr', 'show']).splitlines():
-        if not line.strip().startswith('inet '):
+        if not line.strip().startswith(b'inet '):
             continue
         words = line.split()
         name = words[-1]
         if name in ignore:
             continue
-        addr, _, mask = words[1].partition('/')
+        addr, _, mask = words[1].partition(b'/')
         interfaces.append((name, addr, mask))
     return interfaces
 

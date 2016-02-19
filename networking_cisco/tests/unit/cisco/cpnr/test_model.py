@@ -14,16 +14,19 @@
 
 import mock
 
-from oslo_config import cfg
 from neutron.agent import dhcp_agent
-from neutron.plugins.cisco.cpnr import cpnr_client
-from neutron.plugins.cisco.cpnr import dhcp_driver
-from neutron.plugins.cisco.cpnr import model
-from neutron.plugins.cisco.cpnr import dhcpopts
-from neutron.plugins.cisco.cpnr.tests.unit import fake_networks
 from neutron.tests import base
 
+from oslo_config import cfg
+
+from networking_cisco.plugins.cisco.cpnr import cpnr_client
+from networking_cisco.plugins.cisco.cpnr.dhcp_driver import OPTS
+from networking_cisco.plugins.cisco.cpnr import dhcpopts
+from networking_cisco.plugins.cisco.cpnr import model
+from networking_cisco.tests.unit.cisco.cpnr import fake_networks
+
 dhcp_agent.register_options(cfg.CONF)
+cfg.CONF.register_opts(OPTS, 'cisco_pnr')
 
 
 class TestModel(base.BaseTestCase):
@@ -259,9 +262,9 @@ class TestModel(base.BaseTestCase):
     def test_get_version(self):
         self.client.reset_mock()
 
-        self.client.get_version.return_value = "CPNR Version 8.3"
+        self.client.get_version.return_value = "CPNR Version 8.3.3"
         ver = model.get_version()
-        self.assertEquals(ver, '8.3')
+        self.assertEqual(ver, '8.3.3')
 
     def test_recover_networks(self):
         self.client.reset_mock()
@@ -303,28 +306,28 @@ class TestModel(base.BaseTestCase):
         self.client.get_ccm_hosts(viewid=viewid, zoneid=zoneid)
 
         # Validate that recover_networks returned correct data
-        self.assertEquals(net.vpn.data, rec.vpn.data)
-        self.assertEquals(net.view.data, rec.view.data)
+        self.assertEqual(net.vpn.data, rec.vpn.data)
+        self.assertEqual(net.view.data, rec.view.data)
         for scopeid in net.scopes:
             self.assertIn(scopeid, rec.scopes)
-            self.assertEquals(net.scopes[scopeid].data,
-                              rec.scopes[scopeid].data)
+            self.assertEqual(net.scopes[scopeid].data,
+                             rec.scopes[scopeid].data)
         for clientid in net.client_entries:
             self.assertIn(clientid, rec.client_entries)
-            self.assertEquals(net.client_entries[clientid].data,
-                              rec.client_entries[clientid].data)
+            self.assertEqual(net.client_entries[clientid].data,
+                             rec.client_entries[clientid].data)
         for fzid in net.forward_zones:
             self.assertIn(fzid, rec.forward_zones)
-            self.assertEquals(net.forward_zones[fzid].data,
-                              rec.forward_zones[fzid].data)
+            self.assertEqual(net.forward_zones[fzid].data,
+                             rec.forward_zones[fzid].data)
         for rzid in net.reverse_zones:
             self.assertIn(rzid, rec.reverse_zones)
-            self.assertEquals(net.reverse_zones[rzid].data,
-                              rec.reverse_zones[rzid].data)
+            self.assertEqual(net.reverse_zones[rzid].data,
+                             rec.reverse_zones[rzid].data)
         for hostid in net.hosts:
             self.assertIn(hostid, rec.hosts)
-            self.assertEquals(net.hosts[hostid].data,
-                              rec.hosts[hostid].data)
+            self.assertEqual(net.hosts[hostid].data,
+                             rec.hosts[hostid].data)
 
     def test_policy_from_port(self):
         self.client.reset_mock()
@@ -335,7 +338,7 @@ class TestModel(base.BaseTestCase):
                                                        opts_list[i].opt_value)
                                for i in range(len(opts_list))]
         expected = {'OptionItem': opt_list_pnr_format}
-        self.assertEquals(policy.data['optionList'], expected)
+        self.assertEqual(policy.data['optionList'], expected)
 
     def test_policy_from_subnet(self):
         self.client.reset_mock()
@@ -353,7 +356,7 @@ class TestModel(base.BaseTestCase):
         policy_list_pnr_format = [dhcpopts.format_for_pnr(name, val)
                                   for name, val in fake_policy_opts]
         expected = {'OptionItem': policy_list_pnr_format}
-        self.assertEquals(policy.data['optionList'], expected)
+        self.assertEqual(policy.data['optionList'], expected)
 
     def test_scope_from_subnet(self):
         self.client.reset_mock()
@@ -372,4 +375,4 @@ class TestModel(base.BaseTestCase):
                     'embeddedPolicy': policy.data}
         scope = model.Scope.from_neutron(fake_networks.fake_net3,
                                          fake_networks.fake_subnet1)
-        self.assertEquals(scope.data, expected)
+        self.assertEqual(scope.data, expected)

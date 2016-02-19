@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-#
 # Copyright 2015 Cisco Systems, Inc.  All rights reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -15,10 +13,11 @@
 #    under the License.
 #
 
-from netns import Namespace, nslist, iflist, os, subprocess
-import sys
 import mock
 import unittest
+
+from networking_cisco.plugins.cisco.cpnr.netns import iflist
+from networking_cisco.plugins.cisco.cpnr.netns import nslist
 
 
 class TestNetNs(unittest.TestCase):
@@ -43,39 +42,40 @@ class TestNetNs(unittest.TestCase):
 
     @mock.patch('subprocess.check_output')
     def test_iflist(self, mock_check_output):
-        fh = open('tests/unit/data/ip_addr_show.txt', 'rb')
+        fh = open('networking_cisco/tests/unit/cisco'
+                  '/cpnr/data/ip_addr_show.txt', 'rb')
         ip_addr_str = fh.read()
         fh.close()
         mock_check_output.return_value = ip_addr_str
         interfaces = iflist()
         name, addr, mask = interfaces[0]
-        self.assertEqual(name, 'lo')
-        self.assertEqual(addr, '127.0.0.1')
-        self.assertEqual(mask, '8')
+        self.assertEqual(name, b'lo')
+        self.assertEqual(addr, b'127.0.0.1')
+        self.assertEqual(mask, b'8')
         name, addr, mask = interfaces[1]
-        self.assertEqual(name, 'eth0')
-        self.assertEqual(addr, '10.1.1.1')
-        self.assertEqual(mask, '24')
+        self.assertEqual(name, b'eth0')
+        self.assertEqual(addr, b'10.1.1.1')
+        self.assertEqual(mask, b'24')
 
         # check ignore option
-        interfaces = iflist(ignore=("lo",))
+        interfaces = iflist(ignore=(b"lo",))
         name, addr, mask = interfaces[0]
-        self.assertEqual(name, 'eth0')
-        self.assertEqual(addr, '10.1.1.1')
-        self.assertEqual(mask, '24')
-        with self.assertRaises(IndexError) as context:
+        self.assertEqual(name, b'eth0')
+        self.assertEqual(addr, b'10.1.1.1')
+        self.assertEqual(mask, b'24')
+        with self.assertRaises(IndexError):
             name, addr, mask = interfaces[1]
 
-        interfaces = iflist(ignore=("eth0",))
+        interfaces = iflist(ignore=(b"eth0",))
         name, addr, mask = interfaces[0]
-        self.assertEqual(name, 'lo')
-        self.assertEqual(addr, '127.0.0.1')
-        self.assertEqual(mask, '8')
-        with self.assertRaises(IndexError) as context:
+        self.assertEqual(name, b'lo')
+        self.assertEqual(addr, b'127.0.0.1')
+        self.assertEqual(mask, b'8')
+        with self.assertRaises(IndexError):
             name, addr, mask = interfaces[1]
 
         # test with no input
         mock_check_output.return_value = ''
         interfaces = iflist()
-        with self.assertRaises(IndexError) as context:
+        with self.assertRaises(IndexError):
             name, addr, mask = interfaces[0]

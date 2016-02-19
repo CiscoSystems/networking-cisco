@@ -1,5 +1,3 @@
-# vim: tabstop=4 shiftwidth=4 softtabstop=4
-#
 # Copyright 2014 Cisco Systems, Inc.  All rights reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -14,21 +12,23 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 #
-# @author: Matt Caulfield, Cisco Systems, Inc.
 
 
-import socket
-import os
-import struct
 import binascii
-
 import eventlet
+import os
+import socket
+import struct
+
 from oslo_config import cfg
+from oslo_log import log as logging
 
 from neutron.common import config
-from oslo_log import log as logging
-from neutron.plugins.cisco.cpnr import netns
-from neutron.plugins.cisco.cpnr import debug_stats
+
+from networking_cisco._i18n import _LE, _LW
+from networking_cisco.plugins.cisco.cpnr.cpnr_client import UnexpectedError
+from networking_cisco.plugins.cisco.cpnr import debug_stats
+from networking_cisco.plugins.cisco.cpnr import netns
 
 LOG = logging.getLogger(__name__)
 
@@ -43,6 +43,13 @@ DHCP_SERVER_PORT = 67
 RLIMIT_NOFILE_LIMIT = 16384
 
 OPTS = [
+    cfg.StrOpt('http_server',
+               default="localhost:8080",
+               help=_('External HTTP server, should conform to '
+                      '<server_name:port> format.')),
+    cfg.StrOpt('admin_email',
+               default='test@example.com',
+               help=_('Email address of admin for internal DNS domain.')),
     cfg.StrOpt('external_interface',
                default='lo',
                help=_('Interface for communicating with DHCP/DNS server')),
@@ -102,7 +109,7 @@ class DhcpRelayAgent(object):
             try:
                 curr_ns = set(netns.nslist())
             except Exception:
-                LOG.error(_('Failed to get current namespace set'))
+                LOG.error(_LE('Failed to get current namespace set'))
                 continue
 
             # For each unknown namespace, start a relay thread
@@ -124,8 +131,8 @@ class DhcpRelayAgent(object):
         try:
             self.ext_sock, self.ext_addr = self._open_dhcp_ext_socket()
         except Exception:
-            LOG.exception(_('Failed to open dhcp external socket in '
-                            'global ns'))
+            LOG.exception(_LE("Failed to open dhcp external socket in "
+                              "global ns"))
             return
         recvbuf = bytearray(RECV_BUFFER_SIZE)
 
@@ -142,22 +149,22 @@ class DhcpRelayAgent(object):
                 self.debug_stats.increment_pkts_from_server(vpnid)
                 if ciaddr == "0.0.0.0":
                     ciaddr = "255.255.255.255"
-                LOG.debug(_('Forwarding DHCP response for vpn %s'), vpnid)
+                LOG.debug('Forwarding DHCP response for vpn %s', vpnid)
                 int_sock.sendto(recvbuf[:size], (ciaddr, DHCP_CLIENT_PORT))
                 self.debug_stats.increment_pkts_to_client(vpnid)
             except Exception:
-                LOG.exception(_('Failed to forward dhcp response'))
+                LOG.exception(_LE('Failed to forward dhcp response'))
 
     def _client_network_relay(self, namespace):
 
         # Open a socket in the DHCP network namespace
         try:
-            with self.ns_lock as lock, netns.Namespace(namespace) as ns:
+            with self.ns_lock, netns.Namespace(namespace):
                 recv_sock, send_sock, int_addr = self._open_dhcp_int_socket()
         except Exception:
             self.int_sock_retries += 1
             if self.int_sock_retries >= 2:
-                LOG.exception(_('Failed to open dhcp server socket in %s'),
+                LOG.exception(_LE('Failed to open dhcp server socket in %s'),
                               namespace)
                 self.int_sock_retries = 0
             del self.ns_states[namespace]
@@ -168,7 +175,7 @@ class DhcpRelayAgent(object):
         self.debug_stats.add_network_stats(vpnid)
         self.int_sockets_by_vpn[vpnid] = send_sock
         recvbuf = bytearray(RECV_BUFFER_SIZE)
-        LOG.debug(_('Opened dhcp server socket on ns:%s, addr:%s, vpn:%s'),
+        LOG.debug('Opened dhcp server socket on ns:%s, addr:%s, vpn:%s',
                   namespace, int_addr, vpnid)
 
         # Forward DHCP requests from internal to external networks
@@ -184,11 +191,11 @@ class DhcpRelayAgent(object):
                     pkt.set_relay_option(*option)
                 pkt.set_giaddr(self.ext_addr)
                 self.debug_stats.increment_pkts_from_client(vpnid)
-                LOG.debug(_('Forwarding DHCP request for vpn %s'), vpnid)
+                LOG.debug('Forwarding DHCP request for vpn %s', vpnid)
                 self.ext_sock.send(pkt.data())
                 self.debug_stats.increment_pkts_to_server(vpnid)
             except Exception:
-                LOG.exception(_('Failed to forward dhcp to server from %s'),
+                LOG.exception(_LE('Failed to forward dhcp to server from %s'),
                               namespace)
 
         # Cleanup socket and internal state
@@ -199,7 +206,7 @@ class DhcpRelayAgent(object):
             recv_sock.close()
             send_sock.close()
         except Exception:
-            LOG.warning(_('Failed to cleanup relay for %s'), namespace)
+            LOG.warning(_LW('Failed to cleanup relay for %s'), namespace)
 
     def _open_dhcp_ext_socket(self):
 
@@ -208,7 +215,8 @@ class DhcpRelayAgent(object):
             if ifname == self.conf.cisco_pnr.external_interface:
                 break
         else:
-            raise Exception('Failed to find external intf matching config')
+            raise UnexpectedError(msg='Failed to find external intf '
+                                      'matching config')
 
         # open, bind, and connect UDP socket
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -222,7 +230,8 @@ class DhcpRelayAgent(object):
         # list interfaces, fail if not exactly one
         interfaces = netns.iflist(ignore=("lo",))
         if not interfaces:
-            raise Exception("failed to find single interface in dhcp ns")
+            raise UnexpectedError(msg="failed to find single interface "
+                                      "in dhcp ns")
         _, addr, _ = interfaces[0]
 
         # open socket for receiving DHCP requests on internal net
@@ -250,7 +259,7 @@ class DhcpRelayAgent(object):
             self.debug_stats.write_stats_to_file()
 
 
-class DhcpPacket:
+class DhcpPacket(object):
 
     def __init__(self):
         self.buf = ''
@@ -263,7 +272,7 @@ class DhcpPacket:
         pkt = DhcpPacket()
         (pkt.ciaddr,) = cls.struct('4s').unpack_from(buf, 12)
         (pkt.giaddr,) = cls.struct('4s').unpack_from(buf, 24)
-        cls.struct('4s').pack_into(buf, 24, '')
+        cls.struct('4s').pack_into(buf, 24, b'')
         pos = 240
         while pos < len(buf):
             (opttag,) = cls.struct('B').unpack_from(buf, pos)
@@ -273,7 +282,7 @@ class DhcpPacket:
             if opttag == 255:
                 pkt.end = pos
                 break
-            (optlen,) = cls.struct('B').unpack_from(buf, pos+1)
+            (optlen,) = cls.struct('B').unpack_from(buf, pos + 1)
             startpos = pos
             pos += 2
             if opttag != 82:
@@ -283,10 +292,10 @@ class DhcpPacket:
             while pos < optend:
                 (subopttag, suboptlen) = cls.struct('BB').unpack_from(buf, pos)
                 fmt = '%is' % (suboptlen,)
-                (val,) = cls.struct(fmt).unpack_from(buf, pos+2)
+                (val,) = cls.struct(fmt).unpack_from(buf, pos + 2)
                 pkt.relay_options[subopttag] = val
                 pos += suboptlen + 2
-            cls.struct('%is' % (optlen+2)).pack_into(buf, startpos, '')
+            cls.struct('%is' % (optlen + 2)).pack_into(buf, startpos, b'')
         pkt.buf = buf
         return pkt
 
@@ -337,14 +346,14 @@ class DhcpPacket:
 def main():
     try:
         netns.increase_ulimit(RLIMIT_NOFILE_LIMIT)
-    except:
-        LOG.error(_('Failed to increase ulimit for DHCP relay'))
+    except Exception:
+        LOG.error(_LE('Failed to increase ulimit for DHCP relay'))
     eventlet.monkey_patch()
     cfg.CONF.register_opts(OPTS, 'cisco_pnr')
     cfg.CONF(project='neutron')
     config.setup_logging()
     if os.getuid() != 0:
-        LOG.error(_('Must run dhcp relay as root'))
+        LOG.error(_LE('Must run dhcp relay as root'))
         return
     relay = DhcpRelayAgent()
     relay.serve()

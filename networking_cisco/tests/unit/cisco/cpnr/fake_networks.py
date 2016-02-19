@@ -127,60 +127,55 @@ fake_meta_port = dhcp.DictModel(dict(id='12345678-1234-aaaa-1234567890ab',
 FAKE_NETWORK_UUID = '12345678-1234-5678-1234567890ab'
 FAKE_NETWORK_DHCP_NS = "qdhcp-%s" % FAKE_NETWORK_UUID
 
-fake_network = dhcp.NetModel(True, dict(id=FAKE_NETWORK_UUID,
+fake_network = dhcp.NetModel(dict(id=FAKE_NETWORK_UUID,
                              tenant_id='aaaaaaaa-aaaa-aaaa-aaaaaaaaaaaa',
                              admin_state_up=True,
                              subnets=[fake_subnet1, fake_subnet2],
                              ports=[fake_port1]))
 
-fake_network_ipv6 = dhcp.NetModel(True, dict(
+fake_network_ipv6 = dhcp.NetModel(dict(
                              id='12345678-1234-5678-1234567890ab',
                              tenant_id='aaaaaaaa-aaaa-aaaa-aaaaaaaaaaaa',
                              admin_state_up=True,
                              subnets=[fake_ipv6_subnet],
                              ports=[fake_ipv6_port]))
 
-fake_network_ipv6_ipv4 = dhcp.NetModel(True, dict(
+fake_network_ipv6_ipv4 = dhcp.NetModel(dict(
                              id='12345678-1234-5678-1234567890ab',
                              tenant_id='aaaaaaaa-aaaa-aaaa-aaaaaaaaaaaa',
                              admin_state_up=True,
                              subnets=[fake_ipv6_subnet, fake_subnet1],
                              ports=[fake_port1]))
 
-fake_net1 = dhcp.NetModel(
-    True, dict(
+fake_net1 = dhcp.NetModel(dict(
         id='12345678-1234-5678-90ab-1234567890ab',
         tenant_id='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
         admin_state_up=True,
         subnets=[fake_subnet1, fake_ipv6_subnet],
         ports=[fake_port1]))
 
-fake_net2 = dhcp.NetModel(
-    True, dict(
+fake_net2 = dhcp.NetModel(dict(
         id='12345678-1234-5678-90ab-1234567890ab',
         tenant_id='aaaaaaaa-aaaa-aaaa-aaaaaaaaaaaa',
         admin_state_up=True,
         subnets=[fake_subnet1, fake_ipv6_subnet],
         ports=[fake_port1, fake_port2]))
 
-fake_net3 = dhcp.NetModel(
-    True, dict(
+fake_net3 = dhcp.NetModel(dict(
         id='12345678-1234-5678-90ab-123456777000',
         tenant_id='aaaaaaaa-aaaa-aaaa-aaaaaaaaaaaa',
         admin_state_up=True,
         subnets=[fake_subnet1],
         ports=[fake_port3, fake_port4]))
 
-empty_network = dhcp.NetModel(
-    True, dict(
+empty_network = dhcp.NetModel(dict(
         id='12345678-1234-5678-1234567890ab',
         tenant_id='aaaaaaaa-aaaa-aaaa-aaaaaaaaaaaa',
         admin_state_up=True,
         subnets=[fake_subnet1],
         ports=[]))
 
-fake_meta_network = dhcp.NetModel(
-    True, dict(id='12345678-1234-5678-1234567890ab',
+fake_meta_network = dhcp.NetModel(dict(id='12345678-1234-5678-1234567890ab',
                tenant_id='aaaaaaaa-aaaa-aaaa-aaaaaaaaaaaa',
                admin_state_up=True,
                subnets=[fake_meta_subnet],

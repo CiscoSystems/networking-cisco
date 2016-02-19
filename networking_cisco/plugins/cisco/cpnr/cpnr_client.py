@@ -17,12 +17,11 @@
 # Cisco's CPNR (Cisco Prime Network Registrar) server
 #######################################################
 
+from neutron.common import exceptions
+from oslo_log import log as logging
+from oslo_serialization import jsonutils
 import requests
 from requests import exceptions as r_exc
-from oslo_serialization import jsonutils
-from oslo_log import log as logging
-from neutron.common import exceptions
-
 
 LOG = logging.getLogger(__name__)
 URL_BASE = "web-services/rest/resource"
@@ -48,7 +47,7 @@ class UnexpectedError(CpnrException):
     message = _("CPNR unexpected error: %(msg)s")
 
 
-class CpnrClient:
+class CpnrClient(object):
     """Class implementing REST APIs for
     the CPNR (Cisco Prime Network Registrar) server
     """
@@ -83,7 +82,7 @@ class CpnrClient:
 
     def _do_request(self, method, url, data=""):
         """Perform REST request and return response."""
-        LOG.debug(_("%s %s %s" % (method, url, str(data))))
+        LOG.debug("%s %s %s", method, url, str(data))
         try:
             # Send request, receive response
             data = jsonutils.dumps(data) if data else None
