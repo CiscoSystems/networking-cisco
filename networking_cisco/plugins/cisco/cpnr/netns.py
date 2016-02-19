@@ -58,13 +58,13 @@ def nslist():
 def iflist(ignore=set()):
     interfaces = []
     for line in subprocess.check_output(['ip', 'addr', 'show']).splitlines():
-        if not line.strip().startswith('inet '):
+        if not line.strip().startswith(b'inet '):
             continue
         words = line.split()
         name = words[-1]
         if name in ignore:
             continue
-        addr, _, mask = words[1].partition('/')
+        addr, _, mask = words[1].partition(b'/')
         interfaces.append((name, addr, mask))
     return interfaces
 

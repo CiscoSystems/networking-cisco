@@ -272,7 +272,7 @@ class DhcpPacket(object):
         pkt = DhcpPacket()
         (pkt.ciaddr,) = cls.struct('4s').unpack_from(buf, 12)
         (pkt.giaddr,) = cls.struct('4s').unpack_from(buf, 24)
-        cls.struct('4s').pack_into(buf, 24, '')
+        cls.struct('4s').pack_into(buf, 24, b'')
         pos = 240
         while pos < len(buf):
             (opttag,) = cls.struct('B').unpack_from(buf, pos)
@@ -295,7 +295,7 @@ class DhcpPacket(object):
                 (val,) = cls.struct(fmt).unpack_from(buf, pos + 2)
                 pkt.relay_options[subopttag] = val
                 pos += suboptlen + 2
-            cls.struct('%is' % (optlen + 2)).pack_into(buf, startpos, '')
+            cls.struct('%is' % (optlen + 2)).pack_into(buf, startpos, b'')
         pkt.buf = buf
         return pkt
 

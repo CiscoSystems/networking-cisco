@@ -225,8 +225,8 @@ class Scope(object):
         # Group all consecutive addresses and create ranges
         ip_ranges = []
         for key, group in groupby(enumerate(sorted(ip_addrs_int)),
-                                  lambda (index, item): index - item):
-            ip_range = map(itemgetter(1), group)
+                                  lambda item: item[0] - item[1]):
+            ip_range = list(map(itemgetter(1), group))
             min_range = str(netaddr.IPAddress(ip_range[0]))
             max_range = str(netaddr.IPAddress(ip_range[-1]))
             ip_ranges.append((min_range, max_range))
@@ -388,7 +388,7 @@ class Policy(object):
         for hr in host_routes:
             (subnet, _, mask) = hr.destination.partition("/")
             sigbytes = ((int(mask) - 1) / 8) + 1
-            prefix = '.'.join(subnet.split('.')[:sigbytes])
+            prefix = '.'.join(subnet.split('.')[:int(sigbytes)])
             destination = mask + '.' + prefix
             encoded_routes.append(destination + ' ' + hr.nexthop)
         return ','.join(encoded_routes)
