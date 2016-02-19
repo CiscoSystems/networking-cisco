@@ -49,28 +49,28 @@ class TestNetNs(unittest.TestCase):
         mock_check_output.return_value = ip_addr_str
         interfaces = iflist()
         name, addr, mask = interfaces[0]
-        self.assertEqual(name, 'lo')
-        self.assertEqual(addr, '127.0.0.1')
-        self.assertEqual(mask, '8')
+        self.assertEqual(name, b'lo')
+        self.assertEqual(addr, b'127.0.0.1')
+        self.assertEqual(mask, b'8')
         name, addr, mask = interfaces[1]
-        self.assertEqual(name, 'eth0')
-        self.assertEqual(addr, '10.1.1.1')
-        self.assertEqual(mask, '24')
+        self.assertEqual(name, b'eth0')
+        self.assertEqual(addr, b'10.1.1.1')
+        self.assertEqual(mask, b'24')
 
         # check ignore option
-        interfaces = iflist(ignore=("lo",))
+        interfaces = iflist(ignore=(b"lo",))
         name, addr, mask = interfaces[0]
-        self.assertEqual(name, 'eth0')
-        self.assertEqual(addr, '10.1.1.1')
-        self.assertEqual(mask, '24')
+        self.assertEqual(name, b'eth0')
+        self.assertEqual(addr, b'10.1.1.1')
+        self.assertEqual(mask, b'24')
         with self.assertRaises(IndexError):
             name, addr, mask = interfaces[1]
 
-        interfaces = iflist(ignore=("eth0",))
+        interfaces = iflist(ignore=(b"eth0",))
         name, addr, mask = interfaces[0]
-        self.assertEqual(name, 'lo')
-        self.assertEqual(addr, '127.0.0.1')
-        self.assertEqual(mask, '8')
+        self.assertEqual(name, b'lo')
+        self.assertEqual(addr, b'127.0.0.1')
+        self.assertEqual(mask, b'8')
         with self.assertRaises(IndexError):
             name, addr, mask = interfaces[1]
 

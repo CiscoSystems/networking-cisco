@@ -122,7 +122,7 @@ class TestDhcpPacket(unittest.TestCase):
     def test_parse(self):
         # DHCP packet contains relay agent option 82
         with open('networking_cisco/tests/unit/cisco/'
-                  'cpnr/data/dhcp_packet.txt', 'rb') as dhcp_file:
+                  'cpnr/data/dhcp_packet.txt', 'rt') as dhcp_file:
             lines = [line.strip() for line in dhcp_file]
             data = ''.join(lines)
             buf = bytearray.fromhex(data)
@@ -130,10 +130,10 @@ class TestDhcpPacket(unittest.TestCase):
             # Test client address
             self.assertEqual(packet.get_ciaddr(), '0.0.0.0')
             # Test relay agent options
-            expected_relay_options = {152: '',
+            expected_relay_options = {152: b'',
                                       11: '10.10.1.2',
                                       5: '10.10.1.2',
-                                      151: 'a7fb1cce171a81'}
+                                      151: b'a7fb1cce171a81'}
             actual_packet_options = {code: packet.get_relay_option(code)
                                      for code in [152, 11, 5, 151]}
             self.assertEqual(actual_packet_options, expected_relay_options)
@@ -144,7 +144,7 @@ class TestDhcpPacket(unittest.TestCase):
 
     def test_data(self):
         with open('networking_cisco/tests/unit/cisco/'
-                  'cpnr/data/dhcp_packet.txt', 'rb') as dhcp_file:
+                  'cpnr/data/dhcp_packet.txt', 'rt') as dhcp_file:
             lines = [line.strip() for line in dhcp_file]
             data = ''.join(lines)
             buf = bytearray.fromhex(data)
@@ -155,17 +155,17 @@ class TestDhcpPacket(unittest.TestCase):
             self.assertNotEqual(-1, hex_data.find(hexlify(packet.ciaddr)))
             self.assertNotEqual(-1, hex_data.find(hexlify(packet.giaddr)))
 
-            expected_relay_options = {152: '',
+            expected_relay_options = {152: b'',
                                       11: '10.10.1.2',
                                       5: '10.10.1.2',
-                                      151: 'a7fb1cce171a81'}
+                                      151: b'a7fb1cce171a81'}
             # Find relay agent sub-options in data
             self.assertNotEqual(-1, hex_data.find(
                 self.get_relay_opt_hex(expected_relay_options[11])))
             self.assertNotEqual(-1, hex_data.find(
                 self.get_relay_opt_hex(expected_relay_options[5])))
             self.assertNotEqual(-1, hex_data.find(
-                "01" + expected_relay_options[151]))
+                b"01" + expected_relay_options[151]))
             self.assertNotEqual(-1, hex_data.find(
                 expected_relay_options[152]))
 
