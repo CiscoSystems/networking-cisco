@@ -205,28 +205,28 @@ class TestDnsPacket(unittest.TestCase):
     def test_skip_over_domain_name(self):
         # test skip over name at beginning, end up on ^
         # 4test5cisco3com0^
-        bytes = bytearray('\x04\x74\x65\x73\x74\x05\x63\x69\x73\x63'
-                          '\x6f\x03\x63\x6f\x6d\x00\x5e')
+        bytes = bytearray(b'\x04\x74\x65\x73\x74\x05\x63\x69\x73\x63'
+                          b'\x6f\x03\x63\x6f\x6d\x00\x5e')
         pos = DnsPacket.skip_over_domain_name(bytes, 0)
         self.assertEqual(pos, 16)
         self.assertEqual(chr(bytes[pos]), '^')
 
         # test skip over name in the middle, end up on ^
         # 2552552552554test5cisco3com0^
-        bytes = bytearray('\xff\xff\xff\xff\x04\x74\x65\x73\x74\x05\x63'
-                          '\x69\x73\x63\x6f\x03\x63\x6f\x6d\x00\x5e')
+        bytes = bytearray(b'\xff\xff\xff\xff\x04\x74\x65\x73\x74\x05\x63'
+                          b'\x69\x73\x63\x6f\x03\x63\x6f\x6d\x00\x5e')
         pos = DnsPacket.skip_over_domain_name(bytes, 4)
         self.assertEqual(pos, 20)
         self.assertEqual(chr(bytes[pos]), '^')
 
         # test skip over length and pointer at beginning, end up on ^
-        bytes = bytearray('\xc0\x55\x5e')
+        bytes = bytearray(b'\xc0\x55\x5e')
         pos = DnsPacket.skip_over_domain_name(bytes, 0)
         self.assertEqual(pos, 2)
         self.assertEqual(chr(bytes[pos]), '^')
 
         # test skip over length and pointer in the middle, end up on ^
-        bytes = bytearray('\xff\xff\xff\xff\xff\xff\xff\xff\xff\xc0\x55\x5e')
+        bytes = bytearray(b'\xff\xff\xff\xff\xff\xff\xff\xff\xff\xc0\x55\x5e')
         pos = DnsPacket.skip_over_domain_name(bytes, 9)
         self.assertEqual(pos, 11)
         self.assertEqual(chr(bytes[pos]), '^')

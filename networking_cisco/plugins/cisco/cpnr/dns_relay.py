@@ -275,10 +275,9 @@ class DnsPacket(object):
     #       - rr type (2 bytes, value = 16)
     #       - class (2 bytes, value = 1)
     #       - ttl (4 bytes, value = 0)
-    #TXT_RR1 = bytearray(b'\x0a\x5f\x63\x70\x6e\x72\x5f\x69\x6e\x66\x6f\x05'
-#'\x63\x69\x73\x63\x6f\x03\x63\x6f\x6d\x00\x00\x10\x00\x01\x00\x00\x00\x00')
-    #TXT_RR = b'\n_cpnr_info\x05cisco\x03com\x00\x00\x10\x00\x01\x00\x00\x00\x00'
-    TXT_RR = bytearray(b'\x0a\x5f\x63\x70\x6e\x72\x5f\x69\x6e\x66\x6f\x05\x63\x69\x73\x63\x6f\x03\x63\x6f\x6d\x00\x00\x10\x00\x01\x00\x00\x00\x00')
+    TXT_RR = bytearray(b'\x0a\x5f\x63\x70\x6e\x72\x5f\x69\x6e\x66\x6f\x05'
+                       b'\x63\x69\x73\x63\x6f\x03\x63\x6f\x6d\x00\x00\x10'
+                       b'\x00\x01\x00\x00\x00\x00')
 
     def __init__(self):
         self.buf = ''
@@ -369,16 +368,16 @@ class DnsPacket(object):
         self.buf[pos:pos + len(DnsPacket.TXT_RR)] = DnsPacket.TXT_RR
         pos += len(DnsPacket.TXT_RR)
         txt_str = 'view: %s' % (self.viewid,)
-        conv_bytes = ('!HB%is' % (len(txt_str),))
-        
-        #self.struct('!HB%is' %
-        #            (len(txt_str),)).pack_into(self.buf, pos,
-        #                                       len(txt_str) + 1,
-        #                                       len(txt_str), txt_str)
+        self.struct('!HB%is' %
+                    (len(txt_str),)).pack_into(self.buf, pos,
+                                               len(txt_str) + 1,
+                                               len(txt_str),
+                                               txt_str.encode('utf-8'))
 
-        self.struct(bytes(conv_bytes,"utf-8")).pack_into(self.buf, pos,
-                                                         len(txt_str) + 1,
-                                                         len(txt_str), txt_str)
+        #self.struct(bytes(conv_bytes,"utf-8")).pack_into(self.buf, pos,
+        #                                                 len(txt_str) + 1,
+        #                                                 len(txt_str),
+        #                                                 bytes(txt_str,"utf-8"))
 
         pos += 3 + len(txt_str)
 
