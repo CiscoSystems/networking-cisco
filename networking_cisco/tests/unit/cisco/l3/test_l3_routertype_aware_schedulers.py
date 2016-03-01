@@ -35,6 +35,7 @@ from neutron.plugins.common import constants as plugin_consts
 from neutron.tests import fake_notifier
 from neutron.tests.unit.extensions import test_l3
 from neutron.tests.unit.plugins.openvswitch import test_agent_scheduler
+from neutron.tests.unit.scheduler import test_l3_agent_scheduler
 
 from networking_cisco.plugins.cisco.common import cisco_constants as c_const
 from networking_cisco.plugins.cisco.db.l3 import ha_db
@@ -56,7 +57,6 @@ from networking_cisco.tests.unit.cisco.l3 import (
     test_l3_router_appliance_plugin)
 from networking_cisco.tests.unit.cisco.l3 import l3_router_test_support
 from networking_cisco.tests.unit.cisco.l3 import test_db_routertype
-from networking_cisco.tests.unit.scheduler import test_l3_agent_scheduler
 
 LOG = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ class TestSchedulingCapableL3RouterServicePlugin(
 
 
 class L3RoutertypeAwareL3AgentSchedulerTestCase(
-    test_l3_agent_scheduler.L3SchedulerTestCaseMixin,
+    test_l3_agent_scheduler.L3SchedulerTestCase,
     test_db_routertype.RoutertypeTestCaseMixin,
     test_db_device_manager.DeviceManagerTestCaseMixin,
     l3_router_test_support.L3RouterTestSupportMixin,
@@ -138,7 +138,7 @@ class L3RoutertypeAwareL3AgentSchedulerTestCase(
 
         # call grandparent's setUp() to avoid that wrong plugin and
         # extensions are used.
-        super(test_l3_agent_scheduler.L3SchedulerTestCaseMixin, self).setUp(
+        super(test_l3_agent_scheduler.L3SchedulerTestCase, self).setUp(
             plugin=core_plugin, service_plugins=service_plugins,
             ext_mgr=ext_mgr)
 
@@ -292,6 +292,15 @@ class L3RoutertypeAwareChanceL3AgentSchedulerTestCase(
 class L3RoutertypeAwareLeastRoutersL3AgentSchedulerTestCase(
     test_l3_agent_scheduler.L3AgentLeastRoutersSchedulerTestCase,
         L3RoutertypeAwareL3AgentSchedulerTestCase):
+
+    # TODO(tbachman): remove for liberty (default in kilo is chance scheudler)
+    def setUp(self):
+        cfg.CONF.set_override('router_scheduler_driver',
+                              'neutron.scheduler.l3_agent_scheduler.'
+                              'LeastRoutersScheduler')
+        # call grandparent's setUp() to avoid that wrong scheduler is used
+        super(test_l3_agent_scheduler.L3AgentLeastRoutersSchedulerTestCase,
+              self).setUp()
     pass
 
 

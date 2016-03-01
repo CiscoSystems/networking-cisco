@@ -15,7 +15,6 @@
 import copy
 import os
 import subprocess
-import thread
 
 from oslo_concurrency import lockutils
 from oslo_config import cfg
@@ -867,7 +866,6 @@ class L3RouterApplianceDBMixin(extraroute_db.ExtraRoute_dbonly_mixin):
 
     @lockutils.synchronized('routerbacklog', 'neutron-')
     def _process_backlogged_routers(self):
-        LOG.debug("Backlog process running %d", thread.get_ident())
         self.ensure_global_router_cleanup()
         if self._refresh_router_backlog:
             self._sync_router_backlog()
@@ -927,12 +925,12 @@ class L3RouterApplianceDBMixin(extraroute_db.ExtraRoute_dbonly_mixin):
                        'hd': gr[HOSTING_DEVICE_ATTR], 'num': num_rtrs, })
             if num_rtrs == 0:
                 LOG.warn(_LW("Global router:%(name)s[id:%(id)s] is present for"
-                         " hosting device:%(hd)s but there are no tenant or "
-                         "redundancy routers with gateway set on that "
-                         "hosting device. Proceeding to delete global "
-                         "router."),
+                             "hosting device:%(hd)s but there are no tenant or"
+                             " redundancy routers with gateway set on that "
+                             "hosting device. Proceeding to delete global "
+                             "router."),
                          {'name': gr['name'], 'id': gr['id'],
-                          'hd': gr[HOSTING_DEVICE_ATTR], })
+                          'hd': gr[HOSTING_DEVICE_ATTR]})
                 try:
                     l3plugin.delete_router(
                             e_context, gr['id'], unschedule=False)
@@ -1120,9 +1118,10 @@ class L3RouterApplianceDBMixin(extraroute_db.ExtraRoute_dbonly_mixin):
         try:
             return query.one()
         except exc.NoResultFound:
-            # This should not happen
-            LOG.error(_LE('DB inconsistency: No type and hosting info '
-                          'associated with router %s'), id)
+            # This should not happen other than transiently because the
+            # requested data is not committed to the DB yet
+            LOG.debug('Transient DB inconsistency: No type and hosting info '
+                      'currently associated with router %s', id)
             raise RouterBindingInfoError(router_id=id)
         except exc.MultipleResultsFound:
             # This should not happen either
@@ -1149,8 +1148,10 @@ class L3RouterApplianceDBMixin(extraroute_db.ExtraRoute_dbonly_mixin):
                 binding_info_db = self._get_router_binding_info(context,
                                                                 router['id'])
         except RouterBindingInfoError:
-            LOG.error(_LE('DB inconsistency: No hosting info associated with '
-                          'router %s'), router['id'])
+            # This should not happen other than transiently because the
+            # requested data is not committed to the DB yet
+            LOG.debug('Transient DB inconsistency: No hosting info currently '
+                      'associated with router %s', router['id'])
             router['hosting_device'] = None
             return
         router['router_type'] = {
@@ -1353,11 +1354,11 @@ def _notify_cfg_agent_port_update(resource, event, trigger, **kwargs):
     original_port = kwargs.get('original_port')
     updated_port = kwargs.get('port')
     if updated_port is not None and original_port is not None and \
-       updated_port.get('admin_state_up') != \
-       original_port.get('admin_state_up'):
+       updated_port.get('admin_state_up') != (
+                    original_port.get('admin_state_up')):
         new_port_data = {'port': {}}
-        new_port_data['port']['admin_state_up'] = \
-            updated_port.get('admin_state_up')
+        new_port_data['port']['admin_state_up'] = (
+            updated_port.get('admin_state_up'))
         original_device_owner = original_port.get('device_owner', '')
         if original_device_owner.startswith('network'):
             router_id = original_port.get('device_id')

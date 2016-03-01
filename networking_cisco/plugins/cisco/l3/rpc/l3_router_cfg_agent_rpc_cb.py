@@ -21,7 +21,6 @@ from neutron.common import constants
 from neutron.common import exceptions
 from neutron.common import utils
 from neutron import context as neutron_context
-from neutron.db import api as db_api
 from neutron.extensions import l3
 from neutron.extensions import portbindings
 from neutron import manager

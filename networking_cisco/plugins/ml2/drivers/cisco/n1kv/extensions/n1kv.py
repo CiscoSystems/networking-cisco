@@ -49,6 +49,10 @@ class N1kv(extensions.ExtensionDescriptor):
                  "network profile attribute to network resource.")
 
     @classmethod
+    def get_namespace(cls):
+        return "http://docs.openstack.org/ext/n1kv/api/v2.0"
+
+    @classmethod
     def get_updated(cls):
         return "2014-11-23T13:33:25-00:00"
 

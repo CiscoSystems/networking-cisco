@@ -61,25 +61,35 @@ old_n1kv.N1kvVxlanAllocation = new_n1kv.N1kvVxlanAllocation
 old_n1kv.ProfileBinding = new_n1kv.ProfileBinding
 
 from neutron.plugins.ml2.drivers.cisco.apic import (
-    apic_model as old_apic_model)
+    apic_model as old_apic)  # noqa
 
 tables_to_drop = ['cisco_ml2_apic_contracts',
                   'cisco_ml2_apic_host_links',
                   'cisco_ml2_apic_names']
-
 for tbl in model_base.BASEV2.metadata.sorted_tables:
     if tbl.name in tables_to_drop:
         model_base.BASEV2.metadata.remove(tbl)
 
 from networking_cisco.plugins.ml2.drivers.cisco.apic import (
-    apic_model as new_apic_model)
+    apic_model as new_apic)  # noqa
+old_apic.RouterContract = new_apic.RouterContract
+old_apic.HostLink = new_apic.HostLink
+old_apic.ApicName = new_apic.ApicName
 
-old_apic_model.ApicName = new_apic_model.ApicName
-old_apic_model.HostLink = new_apic_model.HostLink
-old_apic_model.RouterContract = new_apic_model.RouterContract
+from neutron.plugins.ml2.drivers.cisco.ucsm import (
+    ucsm_model as old_ucsm)  # noqa
+
+tables_to_drop = ['ml2_ucsm_port_profiles']
+for tbl in model_base.BASEV2.metadata.sorted_tables:
+    if tbl.name in tables_to_drop:
+        model_base.BASEV2.metadata.remove(tbl)
+
+from networking_cisco.plugins.ml2.drivers.cisco.ucsm import (
+    ucsm_model as new_ucsm)
+old_ucsm.PortProfile = new_ucsm.PortProfile
 
 from neutron.plugins.ml2.drivers.cisco.nexus import (
-    nexus_models_v2 as old_nexus)
+    nexus_models_v2 as old_nexus)  # noqa
 
 tables_to_drop = ['cisco_ml2_nexusport_bindings',
                   'cisco_ml2_nexus_nve',
@@ -89,24 +99,17 @@ tables_to_drop = ['cisco_ml2_nexusport_bindings',
 for tbl in model_base.BASEV2.metadata.sorted_tables:
     if tbl.name in tables_to_drop:
         model_base.BASEV2.metadata.remove(tbl)
-from networking_cisco.plugins.ml2.drivers.cisco.nexus import (
-    nexus_models_v2 as new_nexus)
 
+from networking_cisco.plugins.ml2.drivers.cisco.nexus import (
+    nexus_models_v2 as new_nexus)  # noqa
 old_nexus.NexusPortBinding = new_nexus.NexusPortBinding
 old_nexus.NexusNVEBinding = new_nexus.NexusNVEBinding
 old_nexus.NexusVxlanAllocation = new_nexus.NexusVxlanAllocation
 old_nexus.NexusMcastGroup = new_nexus.NexusMcastGroup
 
-from neutron.plugins.ml2.drivers.cisco.ucsm import (
-    ucsm_model as old_ucsm)
-
-tables_to_drop = ['ml2_ucsm_port_profiles']
-
-for tbl in model_base.BASEV2.metadata.sorted_tables:
-    if tbl.name in tables_to_drop:
-        model_base.BASEV2.metadata.remove(tbl)
-
-from networking_cisco.plugins.ml2.drivers.cisco.ucsm import (
-    ucsm_model as new_ucsm)
-
-old_ucsm.PortProfile = new_ucsm.PortProfile
+# No tables here, but need to replace the extension
+from neutron.plugins.ml2.drivers.cisco.n1kv import (
+    n1kv_ext_driver as old_n1kv_ext)  # noqa
+from networking_cisco.plugins.ml2.drivers.cisco.n1kv import (
+    n1kv_ext_driver as new_n1kv_ext)  # noqa
+old_n1kv_ext.CiscoN1kvExtensionDriver = new_n1kv_ext.CiscoN1kvExtensionDriver

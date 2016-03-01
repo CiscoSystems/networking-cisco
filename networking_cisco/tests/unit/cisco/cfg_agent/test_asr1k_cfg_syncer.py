@@ -129,7 +129,6 @@ class ASR1kCfgSyncer(base.TestCase):
             mock.Mock(return_value=self._read_asr_running_cfg(
                                             'asr_basic_running_cfg.json'))
         invalid_cfg = self.config_syncer.delete_invalid_cfg()
-
         self.assertEqual(8, len(invalid_cfg))
 
     def test_clean_interfaces_basic_multi_region_enabled(self):
@@ -252,4 +251,59 @@ class ASR1kCfgSyncer(base.TestCase):
                                               segment_nat_dict,
                                               parsed_cfg)
         # disabled for now
-        self.assertEqual(2, len(invalid_cfg))
+        # self.assertEqual(2, len(invalid_cfg))
+
+    def test_clean_acls_basic_running_cfg(self):
+        """
+        region 1 acls should be ignored
+        """
+        cfg.CONF.set_override('enable_multi_region', True, 'multi_region')
+        cfg.CONF.set_override('region_id', '0000002', 'multi_region')
+        cfg.CONF.set_override('other_region_ids', ['0000001'], 'multi_region')
+
+        intf_segment_dict = self.config_syncer.intf_segment_dict
+        segment_nat_dict = self.config_syncer.segment_nat_dict
+
+        invalid_cfg = []
+        conn = self.driver._get_connection()
+
+        asr_running_cfg = \
+            self._read_asr_running_cfg(
+                                    'asr_running_cfg.json')
+
+        parsed_cfg = ciscoconfparse.CiscoConfParse(asr_running_cfg)
+
+        invalid_cfg += self.config_syncer.clean_acls(conn,
+                                                     intf_segment_dict,
+                                                     segment_nat_dict,
+                                                     parsed_cfg)
+
+        self.assertEqual(0, len(invalid_cfg))
+
+    def test_clean_nat_pool_overload_basic_running_cfg(self):
+        """
+        region 1 acls should be ignored
+        """
+        cfg.CONF.set_override('enable_multi_region', True, 'multi_region')
+        cfg.CONF.set_override('region_id', '0000002', 'multi_region')
+        cfg.CONF.set_override('other_region_ids', ['0000001'], 'multi_region')
+
+        router_id_dict = self.config_syncer.router_id_dict
+        intf_segment_dict = self.config_syncer.intf_segment_dict
+        segment_nat_dict = self.config_syncer.segment_nat_dict
+
+        invalid_cfg = []
+        conn = self.driver._get_connection()
+
+        asr_running_cfg = \
+            self._read_asr_running_cfg(
+                                    'asr_running_cfg.json')
+
+        parsed_cfg = ciscoconfparse.CiscoConfParse(asr_running_cfg)
+        invalid_cfg += self.config_syncer.clean_nat_pool_overload(conn,
+                                                     router_id_dict,
+                                                     intf_segment_dict,
+                                                     segment_nat_dict,
+                                                     parsed_cfg)
+
+        self.assertEqual(0, len(invalid_cfg))

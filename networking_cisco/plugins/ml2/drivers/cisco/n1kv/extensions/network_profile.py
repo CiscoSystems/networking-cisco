@@ -96,6 +96,10 @@ class Network_profile(extensions.ExtensionDescriptor):
         return "Profile includes the network type of profile for N1kv"
 
     @classmethod
+    def get_namespace(cls):
+        return "http://docs.openstack.org/ext/n1kv/network-profile/api/v2.0"
+
+    @classmethod
     def get_updated(cls):
         return "2014-11-23T10:00:00-00:00"
 
