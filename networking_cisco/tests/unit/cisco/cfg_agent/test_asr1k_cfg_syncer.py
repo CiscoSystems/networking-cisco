@@ -12,7 +12,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import ciscoconfparse
 from oslo_config import cfg
 from oslo_serialization import jsonutils
 
@@ -24,6 +23,7 @@ from networking_cisco.plugins.cisco.cfg_agent.device_drivers.asr1k import (
 
 from networking_cisco.plugins.cisco.cfg_agent.device_drivers.asr1k import (
     asr1k_routing_driver as driver)
+from networking_cisco.plugins.cisco.common.htparser import HTParser
 
 
 cfg.CONF.register_opts(driver.ASR1K_DRIVER_OPTS, "multi_region")
@@ -154,7 +154,7 @@ class ASR1kCfgSyncer(base.TestCase):
         asr_running_cfg = self._read_asr_running_cfg(
             file_name='asr_running_cfg_no_R2.json')
 
-        parsed_cfg = ciscoconfparse.CiscoConfParse(asr_running_cfg)
+        parsed_cfg = HTParser(asr_running_cfg)
 
         invalid_cfg += self.config_syncer.clean_interfaces(conn,
                                               intf_segment_dict,
@@ -181,7 +181,7 @@ class ASR1kCfgSyncer(base.TestCase):
         asr_running_cfg = self._read_asr_running_cfg(
             file_name='asr_running_cfg_no_R2.json')
 
-        parsed_cfg = ciscoconfparse.CiscoConfParse(asr_running_cfg)
+        parsed_cfg = HTParser(asr_running_cfg)
 
         invalid_cfg += self.config_syncer.clean_interfaces(conn,
                                               intf_segment_dict,
@@ -212,7 +212,7 @@ class ASR1kCfgSyncer(base.TestCase):
         # This will trigger gateway only testing
         # asr_running_cfg = \
         #    self._read_asr_running_cfg('asr_basic_running_cfg.json')
-        parsed_cfg = ciscoconfparse.CiscoConfParse(asr_running_cfg)
+        parsed_cfg = HTParser(asr_running_cfg)
 
         invalid_cfg += self.config_syncer.clean_interfaces(conn,
                                               intf_segment_dict,
@@ -246,7 +246,7 @@ class ASR1kCfgSyncer(base.TestCase):
         asr_running_cfg = \
             self._read_asr_running_cfg(
                                     'asr_running_cfg_with_invalid_intfs.json')
-        parsed_cfg = ciscoconfparse.CiscoConfParse(asr_running_cfg)
+        parsed_cfg = HTParser(asr_running_cfg)
         invalid_cfg += self.config_syncer.clean_interfaces(conn,
                                               intf_segment_dict,
                                               segment_nat_dict,
