@@ -1,0 +1,15 @@
+Source: networking-cisco
+Section: python
+Priority: optional
+Maintainer: Cisco Systems, Inc. <openstack-networking@cisco.com>
+Build-Depends: debhelper (>= 9), python-setuptools (>= 3.3), python-all (>= 2.7)
+Standards-Version: 3.9.5
+Homepage: https://github.com/CiscoSystems/networking-cisco
+Vcs-Browser: https://github.com/CiscoSystems/networking-cisco
+
+Package: networking-cisco
+Architecture: all
+Depends: ${misc:Depends}, python-ncclient, python-ciscoconfparse,
+         python-novaclient, python-ucssdk
+Description: Neutron layer 3 plugin for Cisco devices
+ Provides Layer 3 support for Cisco routing products
