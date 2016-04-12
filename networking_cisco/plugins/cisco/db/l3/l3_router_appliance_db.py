@@ -427,16 +427,13 @@ class L3RouterApplianceDBMixin(extraroute_db.ExtraRoute_dbonly_mixin):
         if driver:
             by_port, by_subnet = self._validate_interface_info(
                 interface_info)
-            if by_subnet:
-                subnet_db = self._core_plugin._get_subnet(
-                    context, interface_info['subnet_id'])
-                # FIXME(tbachman): different router needed here
-                port_db = self._get_router_port_db_on_subnet(
-                    r_hd_binding_db.router, subnet_db)
-            else:
-                port_db = self._core_plugin.get_port(context,
+            if by_port:
+                port = self._core_plugin.get_port(context,
                     interface_info['port_id'])
-            port_ctxt = driver_context.RouterPortContext(port_db)
+            else:
+                # no port exists yet, but we still pass a context
+                port = None
+            port_ctxt = driver_context.RouterPortContext(port)
             driver.add_router_interface_precommit(context, port_ctxt)
         info = (super(L3RouterApplianceDBMixin, self).
                 add_router_interface(context, router_id, interface_info))
@@ -453,6 +450,15 @@ class L3RouterApplianceDBMixin(extraroute_db.ExtraRoute_dbonly_mixin):
         routers = [self.get_router(context, router_id)]
         self.add_type_and_hosting_device_info(context.elevated(), routers[0])
         if driver:
+            if by_subnet:
+                subnet_db = self._core_plugin._get_subnet(
+                    context, interface_info['subnet_id'])
+                port = self._get_router_port_db_on_subnet(
+                    r_hd_binding_db.router, subnet_db)
+            else:
+                port = self._core_plugin.get_port(context,
+                    interface_info['port_id'])
+            port_ctxt._port = port
             driver.add_router_interface_postcommit(context, port_ctxt)
         self.notify_router_interface_action(context, info, routers, 'add')
         return info
