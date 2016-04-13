@@ -1,0 +1,5 @@
+networking-cisco (@VERSION@-@REVISION@) trusty; urgency=low
+
+  * [Placeholder]
+
+ -- Thomas Bachman <bachman@noironetworks.com>  Wed,  13 Apr 2016 22:53:44 +0000
