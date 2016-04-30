@@ -23,6 +23,7 @@ from neutron.common import constants as l3_constants
 from neutron.common import test_lib
 from neutron import context
 from neutron.extensions import providernet as pr_net
+from neutron.openstack.common import fileutils
 from neutron.tests.unit.extensions import test_l3
 
 from networking_cisco.plugins.cisco.device_manager.plugging_drivers import (
@@ -286,6 +287,39 @@ class TestAciVLANTrunkingPlugDriver(
                                    'ip': FAKE_IP,
                                    'cidr': sn1['cidr']}])
 
+    def test_extend_hosting_port_info_adds_interface_configuration(self):
+        TEST_INFO_CONFIG_LIST = ['testinfo1', 'testinfo2', 'testinfo3']
+        self.plugging_driver._default_ext_dict = {
+            'gateway_ip': '1.103.2.1',
+            'cidr_exposed': '1.103.2.0/24',
+            'interface_config': TEST_INFO_CONFIG_LIST
+        }
+        with self.network(name='Datacanter-Out') as network1:
+            with self.subnet(network=network1) as subnet1:
+                sn1 = subnet1['subnet']
+                ext_net_id = sn1['network_id']
+                self._set_net_external(ext_net_id)
+                gw_info = {'network_id': ext_net_id}
+                with self.router(external_gateway_info=gw_info,
+                                 tenant_id=sn1['tenant_id']) as router1:
+                    r1 = router1['router']
+                    hosting_info = {}
+                    fake_port_db_obj = FakePortDb('fakeuuid',
+                        sn1['network_id'],
+                        l3_constants.DEVICE_OWNER_ROUTER_INTF,
+                        r1['id'])
+                    hosting_device = {'id':
+                                      '00000000-0000-0000-0000-000000000002'}
+                    tenant_id = 'tenant_uuid1'
+                    ctx = context.Context('', tenant_id, is_admin=True)
+                    self.plugging_driver.extend_hosting_port_info(ctx,
+                        fake_port_db_obj, hosting_device, hosting_info)
+
+                    self.assertTrue(hosting_info.get('interface_config')
+                                    is not None)
+                    for config in hosting_info['interface_config']:
+                        self.assertTrue(config in TEST_INFO_CONFIG_LIST)
+
     def _update_provider_net_info(self, res_list, fields):
         for res in res_list:
             pv_info = self._pv_info['vlan'].get(res['id'])
@@ -402,14 +436,59 @@ class TestAciVLANTrunkingPlugDriver(
                     u_ctx, r1['id'], gw_port_db, 'vlan', 'non_existant_uuid')
                 self.assertIsNone(allocations)
 
+    def test_transit_nets_cfg_invalid_file_format(self):
+        self.plugging_driver._cfg_file = fileutils.write_to_tempfile(
+            """{
+                'EDGENAT': {
+                    'gateway_ip': '1.109.100.254',
+                    'cidr_exposed': '1.109.100.1/24',
+                    'segmentation_id': 1066
+                }
+             }
+             {
+                'EDGENATBackup': {
+                    'gateway_ip': '1.209.200.254',
+                    'cidr_exposed': '1.209.200.1/24',
+                    'segmentation_id': 1066
+                }
+             }"""
+        )
+        # thbachman: couldn't get assertRaises to work here,
+        # so used this construct instead
+        try:
+            # just accessing the member should trigger the exception
+            self.plugging_driver.transit_nets_cfg
+            self.assertTrue(False)
+        except aci_vlan.AciDriverConfigInvalidFileFormat:
+            self.assertTrue(True)
+        fileutils.delete_if_exists(self.plugging_driver._cfg_file)
+
     def test_config_sanity_check(self):
-        test_config = {
+        test_config1 = {
+            'Datacenter-Out': {
+                'cidr_exposed': '1.103.2.0/24'
+            }
+        }
+        test_config2 = {
+            'Datacenter-Out': {
+                'gateway_ip': '1.103.2.1',
+            }
+        }
+        test_config3 = {
             'Datacenter-Out': {
                 'gateway_ip': '1.103.2.254',
                 'cidr_exposed': '1.103.2.1/24',
             }
         }
-        self.plugging_driver._sanity_check_config(test_config)
+        self.assertRaises(aci_vlan.AciDriverConfigMissingGatewayIp,
+                          self.plugging_driver._sanity_check_config,
+                          test_config1)
+        self.assertRaises(aci_vlan.AciDriverConfigMissingCidrExposed,
+                          self.plugging_driver._sanity_check_config,
+                          test_config2)
+        self.assertTrue(
+            test_config3,
+            self.plugging_driver._sanity_check_config(test_config3))
 
     def test_allocate_hosting_port_info_adds_segment_id(self):
         self.plugging_driver._default_ext_dict = {
