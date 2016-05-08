@@ -19,7 +19,7 @@ from oslo_config import cfg
 
 from networking_cisco.plugins.cisco.cfg_agent import cfg_exceptions as cfg_exc
 from networking_cisco.plugins.cisco.cfg_agent.device_drivers.asr1k import (
-    aci_asr1k_snippets)
+    aci_asr1k_snippets as snippets)
 from networking_cisco.plugins.cisco.cfg_agent.device_drivers.asr1k import (
     asr1k_routing_driver as asr1k)
 from networking_cisco.plugins.cisco.cfg_agent.device_drivers.asr1k import (
@@ -129,7 +129,7 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             ip = netaddr.IPNetwork(cidr)
             subnet, mask = ip.network.format(), ip.netmask.format()
             next_hop = self._get_interface_next_hop_from_hosting_port(port)
-            conf_str = aci_asr1k_snippets.SET_TENANT_ROUTE_WITH_INTF % (
+            conf_str = snippets.SET_TENANT_ROUTE_WITH_INTF % (
                 vrf_name, subnet, mask, out_itfc, next_hop)
             self._edit_running_config(conf_str, 'SET_TENANT_ROUTE_WITH_INTF')
 
@@ -141,7 +141,7 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             ip = netaddr.IPNetwork(cidr)
             subnet, mask = ip.network.format(), ip.netmask.format()
             next_hop = self._get_interface_next_hop_from_hosting_port(port)
-            conf_str = aci_asr1k_snippets.REMOVE_TENANT_ROUTE_WITH_INTF % (
+            conf_str = snippets.REMOVE_TENANT_ROUTE_WITH_INTF % (
                 vrf_name, subnet, mask, out_itfc, next_hop)
             self._edit_running_config(conf_str,
                                       'REMOVE_TENANT_ROUTE_WITH_INTF')
@@ -191,12 +191,6 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
     def internal_network_removed(self, ri, port):
         self._remove_tenant_net_route(ri, port)
 
-    def floating_ip_added(self, ri, ext_gw_port, floating_ip, fixed_ip):
-        self._add_floating_ip(ri, ext_gw_port, floating_ip, fixed_ip)
-
-    def floating_ip_removed(self, ri, ext_gw_port, floating_ip, fixed_ip):
-        self._remove_floating_ip(ri, ext_gw_port, floating_ip, fixed_ip)
-
     # ============== Internal "preparation" functions  ==============
 
     def _get_vrf_name(self, ri):
@@ -213,11 +207,6 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             vrf_name = tenant_id
         return vrf_name
 
-    def _add_floating_ip(self, ri, ex_gw_port, floating_ip, fixed_ip):
-        vrf_name = self._get_vrf_name(ri)
-        self._asr_do_add_floating_ip(floating_ip, fixed_ip,
-                                     vrf_name, ex_gw_port)
-
     def _asr_do_add_floating_ip(self, floating_ip, fixed_ip, vrf, ex_gw_port):
         """
         To implement a floating ip, an ip static nat is configured in the
@@ -225,31 +214,32 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
         associated with related subnet for the fixed ip.  The vlan in turn
         is applied to the redundancy parameter for setting the IP NAT.
         """
-        vlan = ex_gw_port['hosting_info']['segmentation_id']
-        hsrp_grp = ex_gw_port['ha_info']['group']
-
         LOG.debug("add floating_ip: %(fip)s, fixed_ip: %(fixed_ip)s, "
                   "vrf: %(vrf)s, ex_gw_port: %(port)s",
                   {'fip': floating_ip, 'fixed_ip': fixed_ip, 'vrf': vrf,
                    'port': ex_gw_port})
 
-        confstr = (asr1k_snippets.SET_STATIC_SRC_TRL_NO_VRF_MATCH %
-            (fixed_ip, floating_ip, vrf, hsrp_grp, vlan))
-        self._edit_running_config(confstr, 'SET_STATIC_SRC_TRL_NO_VRF_MATCH')
+        if ex_gw_port.get(ha.HA_INFO):
+            hsrp_grp = ex_gw_port[ha.HA_INFO]['group']
+            vlan = ex_gw_port['hosting_info']['segmentation_id']
 
-    def _remove_floating_ip(self, ri, ext_gw_port, floating_ip, fixed_ip):
-        vrf_name = self._get_vrf_name(ri)
-        self._asr_do_remove_floating_ip(floating_ip,
-                                        fixed_ip,
-                                        vrf_name,
-                                        ext_gw_port)
+            confstr = (asr1k_snippets.SET_STATIC_SRC_TRL_NO_VRF_MATCH %
+                (fixed_ip, floating_ip, vrf, hsrp_grp, vlan))
+        else:
+            confstr = (snippets.SET_STATIC_SRC_TRL_NO_VRF_MATCH %
+                (fixed_ip, floating_ip, vrf))
+        self._edit_running_config(confstr, 'SET_STATIC_SRC_TRL_NO_VRF_MATCH')
 
     def _asr_do_remove_floating_ip(self, floating_ip,
                                    fixed_ip, vrf, ex_gw_port):
-        vlan = ex_gw_port['hosting_info']['segmentation_id']
-        hsrp_grp = ex_gw_port['ha_info']['group']
+        if ex_gw_port.get(ha.HA_INFO):
+            hsrp_grp = ex_gw_port[ha.HA_INFO]['group']
+            vlan = ex_gw_port['hosting_info']['segmentation_id']
 
-        confstr = (asr1k_snippets.REMOVE_STATIC_SRC_TRL_NO_VRF_MATCH %
-            (fixed_ip, floating_ip, vrf, hsrp_grp, vlan))
+            confstr = (asr1k_snippets.REMOVE_STATIC_SRC_TRL_NO_VRF_MATCH %
+                (fixed_ip, floating_ip, vrf, hsrp_grp, vlan))
+        else:
+            confstr = (snippets.REMOVE_STATIC_SRC_TRL_NO_VRF_MATCH %
+                (fixed_ip, floating_ip, vrf))
         self._edit_running_config(confstr,
                                   'REMOVE_STATIC_SRC_TRL_NO_VRF_MATCH')

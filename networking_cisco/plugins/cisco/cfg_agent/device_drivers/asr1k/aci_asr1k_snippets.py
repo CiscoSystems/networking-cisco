@@ -70,3 +70,33 @@ REMOVE_TENANT_ROUTE_V6_WITH_INTF = """
         </cli-config-data>
 </config>
 """
+
+# ===========================================================================
+# Set Static source translation on an interface
+# Syntax: ip nat inside source static <fixed_ip> <floating_ip>
+# .......vrf <vrf_name>
+# eg: $(config)ip nat inside source static 192.168.0.1 121.158.0.5
+#    ..........vrf nrouter-e7d4y5
+# ==========================================================================
+SET_STATIC_SRC_TRL_NO_VRF_MATCH = """
+<config>
+        <cli-config-data>
+            <cmd>ip nat inside source static %s %s vrf %s</cmd>
+        </cli-config-data>
+</config>
+"""
+
+# ===========================================================================
+# Remove Static source translation on an interface
+# Syntax: no ip nat inside source static <fixed_ip> <floating_ip>
+# .......vrf <vrf_name>
+# eg: $(config)no ip nat inside source static 192.168.0.1 121.158.0.5
+#    ..........vrf nrouter-e7d4y5
+# ==========================================================================
+REMOVE_STATIC_SRC_TRL_NO_VRF_MATCH = """
+<config>
+        <cli-config-data>
+            <cmd>no ip nat inside source static %s %s vrf %s</cmd>
+        </cli-config-data>
+</config>
+"""
