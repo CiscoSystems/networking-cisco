@@ -214,21 +214,28 @@ class TestAciVLANTrunkingPlugDriver(
     def test_extend_hosting_port_info_adds_segmentation_id_internal(self):
         with self.subnet() as subnet1:
             sn1 = subnet1['subnet']
-            hosting_info = {}
-            fake_port_db_obj = mock.MagicMock()
-            fake_port_db_obj.hosting_info = mock.MagicMock()
-            fake_port_db_obj.hosting_info.segmentation_id = 50
-            fake_port_db_obj.device_owner = (
-                l3_constants.DEVICE_OWNER_ROUTER_INTF)
-            fake_port_db_obj.network_id = sn1['network_id']
-            hosting_device = {'id': '00000000-0000-0000-0000-000000000002'}
-            tenant_id = 'tenant_uuid1'
-            ctx = context.Context('', tenant_id, is_admin=True)
-            self.plugging_driver.extend_hosting_port_info(ctx,
-                fake_port_db_obj, hosting_device, hosting_info)
-            self.assertEqual(hosting_info['physical_interface'],
-                             'GigabitEthernet/1/0/1')
-            self.assertEqual(hosting_info['segmentation_id'], 50)
+            ext_net_id = sn1['network_id']
+            self._set_net_external(ext_net_id)
+            gw_info = {'network_id': ext_net_id}
+            with self.router(external_gateway_info=gw_info,
+                             tenant_id=sn1['tenant_id']) as router1:
+                r1 = router1['router']
+                hosting_info = {}
+                fake_port_db_obj = mock.MagicMock()
+                fake_port_db_obj.hosting_info = mock.MagicMock()
+                fake_port_db_obj.hosting_info.segmentation_id = 50
+                fake_port_db_obj.device_owner = (
+                    l3_constants.DEVICE_OWNER_ROUTER_INTF)
+                fake_port_db_obj.device_id = r1['id']
+                fake_port_db_obj.network_id = sn1['network_id']
+                hosting_device = {'id': '00000000-0000-0000-0000-000000000002'}
+                tenant_id = 'tenant_uuid1'
+                ctx = context.Context('', tenant_id, is_admin=True)
+                self.plugging_driver.extend_hosting_port_info(ctx,
+                    fake_port_db_obj, hosting_device, hosting_info)
+                self.assertEqual(hosting_info['physical_interface'],
+                                 'GigabitEthernet/1/0/1')
+                self.assertEqual(hosting_info['segmentation_id'], 50)
 
     def test_extend_hosting_port_info_adds_segmentation_id_external(self):
         with self.subnet() as subnet1:
