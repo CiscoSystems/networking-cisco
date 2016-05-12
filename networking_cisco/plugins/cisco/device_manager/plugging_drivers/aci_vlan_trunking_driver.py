@@ -163,8 +163,9 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
         # network names in GBP workflow need to be reduced, since
         # the network may contain UUIDs
         external_network = self.get_ext_net_name(network['name'])
-        return self.transit_nets_cfg.get(
+        transit_net = self.transit_nets_cfg.get(
             external_network) or self._default_ext_dict
+        return transit_net, network
 
     @property
     def l3_plugin(self):
@@ -225,11 +226,18 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
         is_external = (port_db.device_owner == DEVICE_OWNER_ROUTER_GW)
         hosting_info['physical_interface'] = self._get_interface_info(
             hosting_device['id'], port_db.network_id, is_external)
-        ext_dict = self._get_external_network_dict(context, port_db)
+        ext_dict, net = self._get_external_network_dict(context, port_db)
         if not is_external:
             hosting_info['cidr_exposed'] = ext_dict['cidr_exposed']
             hosting_info['next_hop'] = ext_dict['next_hop']
             hosting_info['gateway_ip'] = ext_dict['gateway_ip']
+        else:
+            # If an OpFlex network is used on the external network,
+            # the actual segment ID comes from the confgi file
+            if net.get('provider:network_type') == 'opflex':
+                if ext_dict.get('segmentation_id'):
+                    hosting_info['segmentation_id'] = (
+                        ext_dict['segmentation_id'])
 
     def allocate_hosting_port(self, context, router_id, port_db, network_type,
                               hosting_device_id):

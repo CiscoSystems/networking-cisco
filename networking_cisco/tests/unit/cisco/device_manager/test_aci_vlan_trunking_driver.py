@@ -382,3 +382,35 @@ class TestAciVLANTrunkingPlugDriver(
             }
         }
         self.plugging_driver._sanity_check_config(test_config)
+
+    def test_extend_hosting_port_info_adds_segment_id(self):
+        self.plugging_driver._default_ext_dict = {
+            'gateway_ip': '1.103.2.1',
+            'next_hop': '1.103.2.254',
+            'cidr_exposed': '1.103.2.0/24',
+            'interface_config': 'testinfo1',
+            'segmentation_id': 3003
+        }
+        with self.network(name='Datacanter-Out') as network1:
+            net1 = network1['network']
+            net1['provider:network_type'] = 'opflex'
+
+            def _return_mocked_net(self, args):
+                return net1
+
+            with self.subnet(network=network1) as subnet1:
+                sn1 = subnet1['subnet']
+                hosting_info = {}
+                fake_port_db_obj = mock.MagicMock()
+                fake_port_db_obj.hosting_info = mock.MagicMock()
+                fake_port_db_obj.device_owner = (
+                    l3_constants.DEVICE_OWNER_ROUTER_GW)
+                fake_port_db_obj.network_id = sn1['network_id']
+                hosting_device = {'id': '00000000-0000-0000-0000-000000000002'}
+                tenant_id = 'tenant_uuid1'
+                ctx = context.Context('', tenant_id, is_admin=True)
+                with mock.patch.object(self.core_plugin, 'get_network') as m1:
+                    m1.side_effect = _return_mocked_net
+                    self.plugging_driver.extend_hosting_port_info(ctx,
+                        fake_port_db_obj, hosting_device, hosting_info)
+                    self.assertEqual(hosting_info['segmentation_id'], 3003)
