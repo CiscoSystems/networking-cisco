@@ -96,6 +96,12 @@ class AciAsr1kRouterTypeDriverTestCase(
                                       cidr='1.103.2.0/24', tenant_id=tenant_id)
             s = self.deserialize(self.fmt, res)
             self._set_net_external(s['subnet']['network_id'])
+            # add a second subnet, just to verify that when we create
+            # the global router that it picks the correct subnet
+            res = self._create_subnet(self.fmt, n_external['network']['id'],
+                                      cidr='1.103.3.0/24', tenant_id=tenant_id)
+            s2 = self.deserialize(self.fmt, res)
+            self._set_net_external(s2['subnet']['network_id'])
             with self.router(tenant_id=tenant_id,
                              set_context=set_context) as router1,\
                     self.router(name='router2', tenant_id=tenant_id,
