@@ -17,12 +17,15 @@ import os
 import mock
 from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_utils import uuidutils
 import six
 
 import networking_cisco.tests.unit.cisco.test_setup_monkeypatch  # noqa
 from neutron.api.v2 import attributes
+from neutron.common import constants as l3_constants
 from neutron import context as q_context
 from neutron.db import agents_db
+from neutron.extensions import external_net as external_net
 from neutron.extensions import extraroute
 from neutron.extensions import l3
 from neutron.extensions import providernet as pnet
@@ -45,6 +48,7 @@ from networking_cisco.tests.unit.cisco.l3 import l3_router_test_support
 from networking_cisco.tests.unit.cisco.l3 import test_db_routertype
 
 LOG = logging.getLogger(__name__)
+_uuid = uuidutils.generate_uuid
 
 
 CORE_PLUGIN_KLASS = device_manager_test_support.CORE_PLUGIN_KLASS
@@ -411,3 +415,112 @@ class L3CfgAgentRouterApplianceTestCase(L3RouterApplianceTestCaseBase,
         kargs = [item for item in args]
         kargs.append(self._l3_cfg_agent_mock)
         target_func(*kargs)
+
+
+class L3RouterApplianceGbpTestCase(test_l3.L3NatTestCaseMixin,
+                                   L3RouterApplianceTestCaseBase):
+
+    router_type = "ASR1k_Neutron_router"
+
+    def setUp(self, core_plugin=None, l3_plugin=None, dm_plugin=None,
+              ext_mgr=None):
+        super(L3RouterApplianceGbpTestCase, self).setUp(
+            core_plugin=core_plugin, l3_plugin=l3_plugin, dm_plugin=dm_plugin,
+            ext_mgr=ext_mgr)
+        self._created_mgmt_nw = False
+        self.saved_service_plugins = manager.NeutronManager.get_service_plugins
+        manager.NeutronManager.get_service_plugins = mock.Mock(
+            return_value={'GROUP_POLICY': object(),
+                          service_constants.L3_ROUTER_NAT: self}
+        )
+
+    def tearDown(self):
+        super(L3RouterApplianceGbpTestCase, self).tearDown()
+        manager.NeutronManager.get_service_plugins = self.saved_service_plugins
+
+    def test_is_gbp_workflow(self):
+        self.assertTrue(self.plugin.is_gbp_workflow)
+
+    def test_create_floatingip_gbp(self):
+        kwargs = {'arg_list': (external_net.EXTERNAL,),
+                  external_net.EXTERNAL: True}
+        self.plugin._update_fip_assoc = mock.Mock()
+        with self.network(**kwargs) as net:
+            with self.subnet(network=net, cidr='200.0.0.0/22') as sub:
+                subnet = sub['subnet']
+                # dummy func is used to verify that our stub was called
+                dummy_func = mock.Mock()
+
+                def _stub_modify_context(context, fip_context):
+                    context.nat_pool_list = [{'subnet_id': subnet['id']}]
+                    dummy_func(context)
+
+                mock_drvr = mock.Mock()
+                mock_drvr.create_floatingip_precommit = _stub_modify_context
+                self.plugin._get_router_type_driver = mock.Mock(
+                    return_value=mock_drvr
+                )
+                network = net['network']
+                floating_ip = {
+                    'floatingip': {'floating_network_id': network['id']}
+                }
+                ctx = q_context.get_admin_context()
+                self.plugin.create_floatingip(ctx, floating_ip)
+                dummy_func.assert_called_once_with(ctx)
+                mock_drvr.create_floatingip_postcommit.assert_called_once_with(
+                    ctx, mock.ANY)
+                self.plugin._update_fip_assoc.assert_called_once_with(ctx,
+                    mock.ANY, mock.ANY, mock.ANY)
+
+    def test_update_floatingip_gbp(self):
+        self.plugin._do_update_floatingip = mock.Mock()
+        ctx = q_context.get_admin_context()
+        TEST_FIP_UUID = _uuid()
+        floating_ip = {
+            'floatingip': {'floating_network_id': _uuid()}
+        }
+        self.plugin.update_floatingip(ctx, TEST_FIP_UUID, floating_ip)
+        self.plugin._do_update_floatingip.assert_called_once_with(ctx,
+            TEST_FIP_UUID, floating_ip, add_fip=True)
+
+
+class L3RouterApplianceNoGbpTestCase(test_l3.L3NatTestCaseMixin,
+                                     L3RouterApplianceTestCaseBase):
+    router_type = "ASR1k_Neutron_router"
+
+    def setUp(self, core_plugin=None, l3_plugin=None, dm_plugin=None,
+              ext_mgr=None):
+        super(L3RouterApplianceNoGbpTestCase, self).setUp(
+            core_plugin=core_plugin, l3_plugin=l3_plugin, dm_plugin=dm_plugin,
+            ext_mgr=ext_mgr)
+        self._created_mgmt_nw = False
+
+    def tearDown(self):
+        super(L3RouterApplianceNoGbpTestCase, self).tearDown()
+
+    def test_is_not_gbp_workflow(self):
+        self.assertFalse(self.plugin.is_gbp_workflow)
+
+    def test_create_floatingip_gbp(self):
+        self.plugin._update_fip_assoc = mock.Mock()
+        self.plugin._create_floatingip = mock.Mock()
+        self.plugin._create_floatingip_gbp = mock.Mock()
+        ctx = q_context.get_admin_context()
+        floating_ip = {
+            'floatingip': {'floating_network_id': _uuid()}
+        }
+        self.plugin.create_floatingip(ctx, floating_ip)
+        self.plugin._create_floatingip_gbp.assert_not_called()
+        self.plugin._create_floatingip.assert_called_once_with(ctx,
+            floating_ip, initial_status=l3_constants.FLOATINGIP_STATUS_ACTIVE)
+
+    def test_update_floatingip_no_gbp(self):
+        self.plugin._do_update_floatingip = mock.Mock()
+        ctx = q_context.get_admin_context()
+        TEST_FIP_UUID = _uuid()
+        floating_ip = {
+            'floatingip': {'floating_network_id': _uuid()}
+        }
+        self.plugin.update_floatingip(ctx, TEST_FIP_UUID, floating_ip)
+        self.plugin._do_update_floatingip.assert_called_once_with(ctx,
+            TEST_FIP_UUID, floating_ip)
