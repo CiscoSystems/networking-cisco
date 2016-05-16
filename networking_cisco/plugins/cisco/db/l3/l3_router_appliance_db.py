@@ -531,7 +531,7 @@ class L3RouterApplianceDBMixin(extraroute_db.ExtraRoute_dbonly_mixin):
                                                   router_type_id)
             if driver:
                 fip_ctxt = driver_context.FloatingipContext(
-                        floatingip.get('floating_ip'))
+                        floatingip.get('floatingip'))
                 driver.create_floatingip_postcommit(context, fip_ctxt)
         self._notify_affected_routers(context, router_ids, 'create_floatingip')
         return info
