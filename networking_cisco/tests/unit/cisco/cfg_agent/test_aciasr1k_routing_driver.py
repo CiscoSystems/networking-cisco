@@ -94,6 +94,18 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         self.ri.internal_ports = int_ports
         self.ri_global.internal_ports = int_ports
 
+    def _assert_edit_run_cfg_calls(self, call_args):
+        mock_calls = self.driver._ncc_connection.edit_config.mock_calls
+        for index in range(len(call_args)):
+            snippet_name, params = call_args[index]
+            if params:
+                confstr = snippet_name % params
+            else:
+                confstr = snippet_name
+            self.assertEqual(
+                mock_calls[index][2]['config'],
+                confstr)
+
     def test_internal_network_added(self):
         cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self.driver.internal_network_added(self.ri, self.port)
@@ -194,3 +206,65 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         self.driver._do_remove_sub_interface = mock.MagicMock()
         self.driver.internal_network_removed(self.ri, self.port)
         self.assertFalse(self.driver._do_remove_sub_interface.called)
+
+    def _next_ip(self, curr_ip):
+        ip = netaddr.IPAddress(curr_ip)
+        ip.value += 1
+        return str(ip)
+
+    def test_floating_ip_added_extra_subnets(self):
+
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
+        self.ex_gw_port['extra_subnets'] = [{'cidr': '20.0.0.0/24'}]
+        self.driver.floating_ip_added(self.ri, self.ex_gw_port,
+                                      self.floating_ip, self.fixed_ip)
+        self.driver.floating_ip_added(self.ri, self.ex_gw_port,
+                                      self._next_ip(self.floating_ip),
+                                      self._next_ip(self.fixed_ip))
+        self._assert_number_of_edit_run_cfg_calls(4)
+        call_args = []
+        call_args.append((asr_snippets.SET_STATIC_SRC_TRL_NO_VRF_MATCH,
+            (self.fixed_ip, self.floating_ip, self.vrf,
+            self.ex_gw_ha_group, self.vlan_ext)))
+        sub_interface = self.phy_infc + '.' + str(self.vlan_ext)
+        call_args.append((snippets.ADD_SECONDARY_IP,
+            (sub_interface, '20.0.0.254', '255.255.255.0')))
+        call_args.append((asr_snippets.SET_STATIC_SRC_TRL_NO_VRF_MATCH,
+            (self._next_ip(self.fixed_ip), self._next_ip(self.floating_ip),
+             self.vrf, self.ex_gw_ha_group, self.vlan_ext)))
+        call_args.append((snippets.ADD_SECONDARY_IP,
+            (sub_interface, '20.0.0.254', '255.255.255.0')))
+        self._assert_edit_run_cfg_calls(call_args)
+        del(self.ex_gw_port['extra_subnets'])
+
+    def test_floating_ip_removed_extra_subnets(self):
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
+        self.ex_gw_port['extra_subnets'] = [{'cidr': '20.0.0.0/24'}]
+        fips = [{'floating_ip_address': self.floating_ip},
+                {'floating_ip_address': self._next_ip(self.floating_ip)}]
+        self.router[l3_constants.FLOATINGIP_KEY] = fips
+        # First removal shouldn't remove secondary address
+        self.driver.floating_ip_removed(self.ri, self.ex_gw_port,
+                                        self._next_ip(self.floating_ip),
+                                        self._next_ip(self.fixed_ip))
+        self._assert_number_of_edit_run_cfg_calls(1)
+        call_args = []
+        call_args.append((asr_snippets.REMOVE_STATIC_SRC_TRL_NO_VRF_MATCH,
+            (self._next_ip(self.fixed_ip), self._next_ip(self.floating_ip),
+             self.vrf, self.ex_gw_ha_group, self.vlan_ext)))
+        self._assert_edit_run_cfg_calls(call_args)
+        self.driver._ncc_connection.edit_config.reset_mock()
+        # adjust our list for the next call
+        self.router[l3_constants.FLOATINGIP_KEY].pop()
+        self.driver.floating_ip_removed(self.ri, self.ex_gw_port,
+                                        self.floating_ip, self.fixed_ip)
+        self._assert_number_of_edit_run_cfg_calls(2)
+        call_args = []
+        call_args.append((asr_snippets.REMOVE_STATIC_SRC_TRL_NO_VRF_MATCH,
+            (self.fixed_ip, self.floating_ip, self.vrf,
+             self.ex_gw_ha_group, self.vlan_ext)))
+        sub_interface = self.phy_infc + '.' + str(self.vlan_ext)
+        call_args.append((snippets.REMOVE_SECONDARY_IP,
+            (sub_interface, '20.0.0.254', '255.255.255.0')))
+        self._assert_edit_run_cfg_calls(call_args)
+        del(self.ex_gw_port['extra_subnets'])
