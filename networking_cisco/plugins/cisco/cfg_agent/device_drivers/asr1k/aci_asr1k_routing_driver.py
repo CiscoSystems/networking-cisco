@@ -207,7 +207,69 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             vrf_name = tenant_id
         return vrf_name
 
-    def _asr_do_add_floating_ip(self, floating_ip, fixed_ip, vrf, ex_gw_port):
+    def _add_floating_ip(self, ri, ex_gw_port, floating_ip, fixed_ip):
+        vrf_name = self._get_vrf_name(ri)
+        self._asr_do_add_floating_ip(ri, floating_ip, fixed_ip,
+                                     vrf_name, ex_gw_port)
+
+    def _remove_floating_ip(self, ri, ext_gw_port, floating_ip, fixed_ip):
+        vrf_name = self._get_vrf_name(ri)
+        self._asr_do_remove_floating_ip(ri, floating_ip,
+                                        fixed_ip,
+                                        vrf_name,
+                                        ext_gw_port)
+
+    def _asr_do_add_secondary_ip(self, ri, floating_ip, port):
+        # get the list of extra subnets from the GW port and check
+        # if this IP address matches one of them
+        fip = netaddr.IPAddress(floating_ip)
+        secondary_ip = ''
+        subnets = ri.router['gw_port'].get('extra_subnets', [])
+        for subnet in subnets:
+            net = netaddr.IPNetwork(subnet['cidr'])
+            if (fip.value & net.netmask.value) == net.value:
+                secondary_ip = netaddr.IPAddress(net.value +
+                    (net.hostmask.value - 1))
+                break
+        if secondary_ip == '':
+            return
+        sub_interface = self._get_interface_name_from_hosting_port(port)
+        conf_str = (snippets.ADD_SECONDARY_IP % (
+                       sub_interface, secondary_ip, str(net.netmask)))
+        self._edit_running_config(conf_str, 'ADD_SECONDARY_IP')
+
+    def _asr_do_remove_secondary_ip(self, ri, floating_ip, port):
+        fip = netaddr.IPAddress(floating_ip)
+        secondary_ip = ''
+        # Find the subnet this belnogs to, if present
+        subnets = ri.router['gw_port'].get('extra_subnets', [])
+        for subnet in subnets:
+            net = netaddr.IPNetwork(subnet['cidr'])
+            if (fip.value & net.netmask.value) == net.value:
+                secondary_ip = netaddr.IPAddress(net.value +
+                    (net.hostmask.value - 1))
+                break
+        if secondary_ip == '':
+            return
+
+        # See if there are any other FIPs on this subnet
+        other_fips = False
+        for curr_fip in ri.router.get(constants.FLOATINGIP_KEY, []):
+            # skip the FIP we're deleting
+            if curr_fip['floating_ip_address'] == floating_ip:
+                continue
+            fip = netaddr.IPAddress(curr_fip['floating_ip_address'])
+            if (fip.value & net.netmask.value) == net.value:
+                other_fips = True
+                break
+        if other_fips:
+            return
+        sub_interface = self._get_interface_name_from_hosting_port(port)
+        conf_str = (snippets.REMOVE_SECONDARY_IP % (
+                       sub_interface, secondary_ip, str(net.netmask)))
+        self._edit_running_config(conf_str, 'REMOVE_SECONDARY_IP')
+
+    def _asr_do_add_floating_ip(self, ri, floating_ip, fixed_ip, vrf, ex_gw_port):
         """
         To implement a floating ip, an ip static nat is configured in the
         underlying router ex_gw_port contains data to derive the vlan
@@ -229,8 +291,9 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             confstr = (snippets.SET_STATIC_SRC_TRL_NO_VRF_MATCH %
                 (fixed_ip, floating_ip, vrf))
         self._edit_running_config(confstr, 'SET_STATIC_SRC_TRL_NO_VRF_MATCH')
+        self._asr_do_add_secondary_ip(ri, floating_ip, ex_gw_port)
 
-    def _asr_do_remove_floating_ip(self, floating_ip,
+    def _asr_do_remove_floating_ip(self, ri, floating_ip,
                                    fixed_ip, vrf, ex_gw_port):
         if ex_gw_port.get(ha.HA_INFO):
             hsrp_grp = ex_gw_port[ha.HA_INFO]['group']
@@ -243,3 +306,4 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
                 (fixed_ip, floating_ip, vrf))
         self._edit_running_config(confstr,
                                   'REMOVE_STATIC_SRC_TRL_NO_VRF_MATCH')
+        self._asr_do_remove_secondary_ip(ri, floating_ip, ex_gw_port)

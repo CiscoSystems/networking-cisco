@@ -100,3 +100,31 @@ REMOVE_STATIC_SRC_TRL_NO_VRF_MATCH = """
         </cli-config-data>
 </config>
 """
+
+# =======================================================
+# Add secondary IP
+# $(config)interface GigabitEthernet 2.500
+# $(config)ip address 192.168.0.1 255.255.255.0 secondary
+# =======================================================
+ADD_SECONDARY_IP = """
+<config>
+        <cli-config-data>
+            <cmd>interface %s</cmd>
+            <cmd>ip address %s %s secondary</cmd>
+        </cli-config-data>
+</config>
+"""
+
+# =======================================================
+# Remove secondary IP
+# $(config)interface GigabitEthernet 2.500
+# $(config)no ip address 192.168.0.1 255.255.255.0 secondary
+# =======================================================
+REMOVE_SECONDARY_IP = """
+<config>
+        <cli-config-data>
+            <cmd>interface %s</cmd>
+            <cmd>no ip address %s %s secondary</cmd>
+        </cli-config-data>
+</config>
+"""
