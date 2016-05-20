@@ -28,6 +28,7 @@ from networking_cisco.plugins.cisco.common import cisco_constants
 from networking_cisco.plugins.cisco.extensions import ha
 from networking_cisco.plugins.cisco.extensions import routerrole
 from neutron.common import constants
+from neutron.i18n import _LE
 from neutron.i18n import _LI
 
 
@@ -212,64 +213,77 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
         self._asr_do_add_floating_ip(ri, floating_ip, fixed_ip,
                                      vrf_name, ex_gw_port)
 
+        # We need to make sure that our external interface has an IP address
+        # on the same subnet as the floating IP (needed in order to handle ARPs
+        # on the external interface). Search for the matching subnet for this
+        # FIP, and use the highest host address as a secondary address on that
+        # interface
+        subnets = ri.router['gw_port'].get('extra_subnets', [])
+        subnet = self._get_matching_subnet(subnets, floating_ip)
+        if subnet:
+            secondary_ip = netaddr.IPAddress(subnet.value +
+                                             (subnet.hostmask.value - 1))
+            self._asr_do_add_secondary_ip(secondary_ip,
+                                          ex_gw_port, subnet.netmask)
+
     def _remove_floating_ip(self, ri, ext_gw_port, floating_ip, fixed_ip):
         vrf_name = self._get_vrf_name(ri)
         self._asr_do_remove_floating_ip(ri, floating_ip,
                                         fixed_ip,
                                         vrf_name,
                                         ext_gw_port)
-
-    def _asr_do_add_secondary_ip(self, ri, floating_ip, port):
-        # get the list of extra subnets from the GW port and check
-        # if this IP address matches one of them
-        fip = netaddr.IPAddress(floating_ip)
-        secondary_ip = ''
+        # A secondary IP address may need to be removed from the external
+        # interface. Check the known subnets to see which one contains
+        # the floating IP, then search for any other floating IPs on that
+        # subnet. If there aren't any, then the secondary IP can safely
+        # be removed.
         subnets = ri.router['gw_port'].get('extra_subnets', [])
-        for subnet in subnets:
-            net = netaddr.IPNetwork(subnet['cidr'])
-            if (fip.value & net.netmask.value) == net.value:
-                secondary_ip = netaddr.IPAddress(net.value +
-                    (net.hostmask.value - 1))
-                break
-        if secondary_ip == '':
+        subnet = self._get_matching_subnet(subnets, floating_ip)
+        if not subnet:
             return
-        sub_interface = self._get_interface_name_from_hosting_port(port)
-        conf_str = (snippets.ADD_SECONDARY_IP % (
-                       sub_interface, secondary_ip, str(net.netmask)))
-        self._edit_running_config(conf_str, 'ADD_SECONDARY_IP')
-
-    def _asr_do_remove_secondary_ip(self, ri, floating_ip, port):
-        fip = netaddr.IPAddress(floating_ip)
-        secondary_ip = ''
-        # Find the subnet this belnogs to, if present
-        subnets = ri.router['gw_port'].get('extra_subnets', [])
-        for subnet in subnets:
-            net = netaddr.IPNetwork(subnet['cidr'])
-            if (fip.value & net.netmask.value) == net.value:
-                secondary_ip = netaddr.IPAddress(net.value +
-                    (net.hostmask.value - 1))
-                break
-        if secondary_ip == '':
-            return
-
-        # See if there are any other FIPs on this subnet
+        secondary_ip = netaddr.IPAddress(subnet.value +
+                                         (subnet.hostmask.value - 1))
+        # We only remove the secondary IP if there aren't any more FIPs
+        # for this subnet
+        # FIXME(tbachman): should check across all routers
+        # FIXME(tbachman): should already have this list (local cache?)
         other_fips = False
         for curr_fip in ri.router.get(constants.FLOATINGIP_KEY, []):
             # skip the FIP we're deleting
             if curr_fip['floating_ip_address'] == floating_ip:
                 continue
             fip = netaddr.IPAddress(curr_fip['floating_ip_address'])
-            if (fip.value & net.netmask.value) == net.value:
+            if (fip.value & subnet.netmask.value) == subnet.value:
                 other_fips = True
                 break
         if other_fips:
             return
+
+        self._asr_do_remove_secondary_ip(secondary_ip,
+                                         ext_gw_port, subnet.netmask)
+
+    def _get_matching_subnet(self, subnets, ip):
+        target_ip = netaddr.IPAddress(ip)
+        for subnet in subnets:
+            net = netaddr.IPNetwork(subnet['cidr'])
+            if (target_ip.value & net.netmask.value) == net.value:
+                return net
+        return None
+
+    def _asr_do_add_secondary_ip(self, secondary_ip, port, netmask):
+        sub_interface = self._get_interface_name_from_hosting_port(port)
+        conf_str = (snippets.ADD_SECONDARY_IP % (
+                       sub_interface, secondary_ip, netmask))
+        self._edit_running_config(conf_str, 'ADD_SECONDARY_IP')
+
+    def _asr_do_remove_secondary_ip(self, secondary_ip, port, netmask):
         sub_interface = self._get_interface_name_from_hosting_port(port)
         conf_str = (snippets.REMOVE_SECONDARY_IP % (
-                       sub_interface, secondary_ip, str(net.netmask)))
+                       sub_interface, secondary_ip, netmask))
         self._edit_running_config(conf_str, 'REMOVE_SECONDARY_IP')
 
-    def _asr_do_add_floating_ip(self, ri, floating_ip, fixed_ip, vrf, ex_gw_port):
+    def _asr_do_add_floating_ip(self, ri, floating_ip,
+                                fixed_ip, vrf, ex_gw_port):
         """
         To implement a floating ip, an ip static nat is configured in the
         underlying router ex_gw_port contains data to derive the vlan
@@ -291,7 +305,6 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             confstr = (snippets.SET_STATIC_SRC_TRL_NO_VRF_MATCH %
                 (fixed_ip, floating_ip, vrf))
         self._edit_running_config(confstr, 'SET_STATIC_SRC_TRL_NO_VRF_MATCH')
-        self._asr_do_add_secondary_ip(ri, floating_ip, ex_gw_port)
 
     def _asr_do_remove_floating_ip(self, ri, floating_ip,
                                    fixed_ip, vrf, ex_gw_port):
@@ -306,4 +319,44 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
                 (fixed_ip, floating_ip, vrf))
         self._edit_running_config(confstr,
                                   'REMOVE_STATIC_SRC_TRL_NO_VRF_MATCH')
-        self._asr_do_remove_secondary_ip(ri, floating_ip, ex_gw_port)
+
+    def _do_set_snat_pool(self, pool_name, pool_start,
+                          pool_end, pool_net, is_delete):
+        try:
+            if is_delete:
+                conf_str = asr1k_snippets.DELETE_NAT_POOL % (
+                    pool_name, pool_start, pool_end, pool_net)
+                # TODO(update so that hosting device name is passed down)
+                self._edit_running_config(conf_str, 'DELETE_NAT_POOL')
+
+            else:
+                conf_str = asr1k_snippets.CREATE_NAT_POOL % (
+                    pool_name, pool_start, pool_end, pool_net)
+                # TODO(update so that hosting device name is passed down)
+                self._edit_running_config(conf_str, 'CREATE_NAT_POOL')
+        except Exception as cse:
+            LOG.error(_LE("Temporary disable NAT_POOL exception handling: "
+                          "%s"), cse)
+
+    def _set_snat_pools_from_hosting_info(self, ri, gw_port, is_delete):
+        # TODO(tbachma ): unique naming for more than one pool
+        vrf_name = self._get_vrf_name(ri)
+        for subnet in gw_port['hosting_info'].get('snat_subnets', []):
+            net = netaddr.IPNetwork(subnet['cidr'])
+            pool_start = str(netaddr.IPAddress(net.first + 2))
+            pool_end = str(netaddr.IPAddress(net.first + 2))
+            pool_name = "%s_nat_pool" % (vrf_name)
+            self._do_set_snat_pool(pool_name, pool_start,
+                                   pool_end, str(net.netmask), is_delete)
+            secondary_ip = netaddr.IPAddress(net.value +
+                                             (net.hostmask.value - 1))
+            if is_delete:
+                self._asr_do_remove_secondary_ip(secondary_ip,
+                                                 gw_port, str(net.netmask))
+            else:
+                self._asr_do_add_secondary_ip(secondary_ip,
+                                              gw_port, str(net.netmask))
+
+    def _set_nat_pool(self, ri, gw_port, is_delete):
+        if gw_port['hosting_info'].get('snat_subnets'):
+            self._set_snat_pools_from_hosting_info(ri, gw_port, is_delete)

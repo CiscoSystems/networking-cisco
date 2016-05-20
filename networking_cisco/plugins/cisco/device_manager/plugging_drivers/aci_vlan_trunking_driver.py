@@ -28,6 +28,7 @@ from networking_cisco.plugins.cisco.device_manager.plugging_drivers import (
 LOG = logging.getLogger(__name__)
 
 APIC_OWNED = 'apic_owned_'
+APIC_SNAT = 'host-snat-pool-for-internal-use'
 UUID_REGEX = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 DEVICE_OWNER_ROUTER_GW = l3_constants.DEVICE_OWNER_ROUTER_GW
 DEVICE_OWNER_ROUTER_INTF = l3_constants.DEVICE_OWNER_ROUTER_INTF
@@ -238,6 +239,12 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
                 if ext_dict.get('segmentation_id'):
                     hosting_info['segmentation_id'] = (
                         ext_dict['segmentation_id'])
+            snat_subnets = self._core_plugin.get_subnets(
+                context.elevated(), {'name': [APIC_SNAT]})
+            if snat_subnets:
+                hosting_info['snat_subnet_ids'] = []
+                for subnet in snat_subnets:
+                    hosting_info['snat_subnet_ids'].append(subnet['id'])
 
     def allocate_hosting_port(self, context, router_id, port_db, network_type,
                               hosting_device_id):
