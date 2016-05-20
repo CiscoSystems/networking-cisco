@@ -237,7 +237,8 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
             # the actual segment ID comes from the confgi file
             if net.get('provider:network_type') == 'opflex':
                 if ext_dict.get('segmentation_id'):
-                    hosting_info['segmentation_id'] = ext_dict['segmentation_id']
+                    hosting_info['segmentation_id'] = (
+                        ext_dict['segmentation_id'])
             snat_subnets = self._core_plugin.get_subnets(
                 context.elevated(), {'name': [APIC_SNAT]})
             if snat_subnets:
