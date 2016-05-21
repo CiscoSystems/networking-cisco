@@ -16,6 +16,7 @@ import copy
 
 import mock
 from oslo_log import log as logging
+import webob.exc
 
 import networking_cisco.tests.unit.cisco.test_setup_monkeypatch  # noqa
 from neutron.common import constants as l3_constants
@@ -26,6 +27,8 @@ from neutron.tests.unit.extensions import test_l3
 
 from networking_cisco.plugins.cisco.device_manager.plugging_drivers.\
     aci_vlan_trunking_driver import AciVLANTrunkingPlugDriver
+from networking_cisco.plugins.cisco.device_manager.plugging_drivers.\
+    aci_vlan_trunking_driver import APIC_SNAT
 from networking_cisco.tests.unit.cisco.l3 import (
     test_l3_router_appliance_plugin)
 
@@ -255,6 +258,42 @@ class TestAciVLANTrunkingPlugDriver(
             self.assertEqual(hosting_info['physical_interface'],
                              'GigabitEthernet/2/0/1')
             self.assertEqual(hosting_info['segmentation_id'], 40)
+
+    # Had to create this b/c the helper won't let you set the name
+    def _create_subnet_with_name(self, net_id, cidr, name):
+        data = {'subnet': {'network_id': net_id,
+                           'cidr': cidr,
+                           'name': name,
+                           'ip_version': 4,
+                           'tenant_id': self._tenant_id}}
+        subnet_req = self.new_create_request('subnets', data, self.fmt)
+        subnet_res = subnet_req.get_response(self.api)
+        # Things can go wrong - raise HTTP exc with res code only
+        # so it can be caught by unit tests
+        if subnet_res.status_int >= webob.exc.HTTPClientError.code:
+            raise webob.exc.HTTPClientError(code=subnet_res.status_int)
+        return self.deserialize(self.fmt, subnet_res)
+
+    def test_extend_hosting_port_info_adds_snat_subnets(self):
+        with self.network(name='Datacanter-Out') as network:
+            net = network['network']
+            subnet = self._create_subnet_with_name(net['id'],
+                                                   '10.0.0.0/24', APIC_SNAT)
+            sn1 = subnet['subnet']
+            hosting_info = {}
+            fake_port_db_obj = mock.MagicMock()
+            fake_port_db_obj.hosting_info = mock.MagicMock()
+            fake_port_db_obj.hosting_info.segmentation_id = 40
+            fake_port_db_obj.device_owner = (
+                l3_constants.DEVICE_OWNER_ROUTER_GW)
+            fake_port_db_obj.network_id = sn1['network_id']
+            hosting_device = {'id': '00000000-0000-0000-0000-000000000002'}
+            tenant_id = 'tenant_uuid1'
+            ctx = context.Context('', tenant_id, is_admin=True)
+            self.plugging_driver.extend_hosting_port_info(ctx,
+                fake_port_db_obj, hosting_device, hosting_info)
+            self.assertEqual(hosting_info['snat_subnets'],
+                             [{'id': sn1['id'], 'cidr': sn1['cidr']}])
 
     def _update_provider_net_info(self, res_list, fields):
         for res in res_list:
