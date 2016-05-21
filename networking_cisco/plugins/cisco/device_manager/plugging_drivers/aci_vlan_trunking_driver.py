@@ -237,14 +237,14 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
             # the actual segment ID comes from the confgi file
             if net.get('provider:network_type') == 'opflex':
                 if ext_dict.get('segmentation_id'):
-                    hosting_info['segmentation_id'] = (
-                        ext_dict['segmentation_id'])
+                    hosting_info['segmentation_id'] = ext_dict['segmentation_id']
             snat_subnets = self._core_plugin.get_subnets(
                 context.elevated(), {'name': [APIC_SNAT]})
             if snat_subnets:
-                hosting_info['snat_subnet_ids'] = []
+                hosting_info['snat_subnets'] = []
                 for subnet in snat_subnets:
-                    hosting_info['snat_subnet_ids'].append(subnet['id'])
+                    snat_subnet = {'id': subnet['id'], 'cidr': subnet['cidr']}
+                    hosting_info['snat_subnets'].append(snat_subnet)
 
     def allocate_hosting_port(self, context, router_id, port_db, network_type,
                               hosting_device_id):
