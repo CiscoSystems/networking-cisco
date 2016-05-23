@@ -25,8 +25,9 @@ from neutron import context
 from neutron.extensions import providernet as pr_net
 from neutron.tests.unit.extensions import test_l3
 
-from networking_cisco.plugins.cisco.device_manager.plugging_drivers.\
-    aci_vlan_trunking_driver import AciVLANTrunkingPlugDriver
+from networking_cisco.plugins.cisco.device_manager.plugging_drivers import (
+    aci_vlan_trunking_driver as aci_vlan)
+
 from networking_cisco.plugins.cisco.device_manager.plugging_drivers.\
     aci_vlan_trunking_driver import APIC_SNAT
 from networking_cisco.tests.unit.cisco.l3 import (
@@ -120,7 +121,7 @@ class TestAciVLANTrunkingPlugDriver(
         # below call to setup_config()
         self.setup_config()
         self.plugin._core_plugin.mechanism_manager = mock.MagicMock()
-        plug = AciVLANTrunkingPlugDriver()
+        plug = aci_vlan.AciVLANTrunkingPlugDriver()
         plug.apic_driver.get_gbp_details = mock.Mock(
             return_value=self.details)
         plug.apic_driver.l3out_vlan_alloc.get_vlan_allocated = self._stub_vlan
@@ -347,7 +348,6 @@ class TestAciVLANTrunkingPlugDriver(
             self.assertEqual(binding_db.segmentation_id,
                              test_info['vlan_tags'][i])
 
-        #self.plugging_driver = AciVLANTrunkingPlugDriver()
         with self.subnet() as subnet1:
             sn1 = subnet1['subnet']
             ext_net_id = sn1['network_id']
@@ -421,7 +421,7 @@ class TestAciVLANTrunkingPlugDriver(
         }
         self.plugging_driver._sanity_check_config(test_config)
 
-    def test_extend_hosting_port_info_adds_segment_id(self):
+    def test_allocate_hosting_port_info_adds_segment_id(self):
         self.plugging_driver._default_ext_dict = {
             'gateway_ip': '1.103.2.254',
             'cidr_exposed': '1.103.2.1/24',
@@ -430,24 +430,97 @@ class TestAciVLANTrunkingPlugDriver(
         }
         with self.network(name='Datacanter-Out') as network1:
             net1 = network1['network']
+            self._set_net_external(net1['id'])
             net1['provider:network_type'] = 'opflex'
 
             def _return_mocked_net(self, args):
                 return net1
 
+            class FakePortDb(object):
+
+                def __init__(self, id, network_id, device_owner):
+                    self.id = id
+                    self.network_id = network_id
+                    self.network_id = network_id
+                    self.device_owner = device_owner
+
+                def get(self, name):
+                    return self[name]
+
+                def __getitem__(self, key):
+                    if key == 'id':
+                        return self.id
+                    if key == 'network_id':
+                        return self.network_id
+                    if key == 'device_owner':
+                        return self.device_owner
+
             with self.subnet(network=network1) as subnet1:
                 sn1 = subnet1['subnet']
-                hosting_info = {}
-                fake_port_db_obj = mock.MagicMock()
-                fake_port_db_obj.hosting_info = mock.MagicMock()
-                fake_port_db_obj.device_owner = (
-                    l3_constants.DEVICE_OWNER_ROUTER_GW)
-                fake_port_db_obj.network_id = sn1['network_id']
+                fake_port_db_obj = FakePortDb(
+                    'some_dummy_id',
+                    sn1['network_id'],
+                    l3_constants.DEVICE_OWNER_ROUTER_GW
+                )
                 hosting_device = {'id': '00000000-0000-0000-0000-000000000002'}
                 tenant_id = 'tenant_uuid1'
+                dummy_rid = 'dummy_router_id'
                 ctx = context.Context('', tenant_id, is_admin=True)
                 with mock.patch.object(self.core_plugin, 'get_network') as m1:
                     m1.side_effect = _return_mocked_net
-                    self.plugging_driver.extend_hosting_port_info(ctx,
-                        fake_port_db_obj, hosting_device, hosting_info)
-                    self.assertEqual(hosting_info['segmentation_id'], 3003)
+                    allocations = self.plugging_driver.allocate_hosting_port(
+                        ctx, dummy_rid, fake_port_db_obj,
+                        'opflex', hosting_device['id'])
+                    self.assertEqual(allocations['allocated_vlan'], 3003)
+
+    def test_allocate_hosting_port_info_exception(self):
+        self.plugging_driver._default_ext_dict = {
+            'gateway_ip': '1.103.2.254',
+            'cidr_exposed': '1.103.2.1/24',
+            'interface_config': 'testinfo1',
+        }
+        with self.network(name='Datacanter-Out') as network1:
+            net1 = network1['network']
+            self._set_net_external(net1['id'])
+            net1['provider:network_type'] = 'opflex'
+
+            def _return_mocked_net(self, args):
+                return net1
+
+            class FakePortDb(object):
+
+                def __init__(self, id, network_id, device_owner):
+                    self.id = id
+                    self.network_id = network_id
+                    self.network_id = network_id
+                    self.device_owner = device_owner
+
+                def get(self, name):
+                    return self[name]
+
+                def __getitem__(self, key):
+                    if key == 'id':
+                        return self.id
+                    if key == 'network_id':
+                        return self.network_id
+                    if key == 'device_owner':
+                        return self.device_owner
+
+            with self.subnet(network=network1) as subnet1:
+                sn1 = subnet1['subnet']
+                fake_port_db_obj = FakePortDb(
+                    'some_dummy_id',
+                    sn1['network_id'],
+                    l3_constants.DEVICE_OWNER_ROUTER_GW
+                )
+                hosting_device = {'id': '00000000-0000-0000-0000-000000000002'}
+                tenant_id = 'tenant_uuid1'
+                dummy_rid = 'dummy_router_id'
+                ctx = context.Context('', tenant_id, is_admin=True)
+                with mock.patch.object(self.core_plugin, 'get_network') as m1:
+                    m1.side_effect = _return_mocked_net
+                    self.assertRaises(
+                        aci_vlan.AciDriverConfigMissingSegmentationId,
+                        self.plugging_driver.allocate_hosting_port,
+                        ctx, dummy_rid, fake_port_db_obj,
+                        'opflex', hosting_device['id'])

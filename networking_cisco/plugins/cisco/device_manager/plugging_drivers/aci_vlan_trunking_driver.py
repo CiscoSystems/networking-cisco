@@ -54,6 +54,11 @@ class AciDriverConfigMissingCidrExposed(n_exc.BadRequest):
                 "parameter for %(ext_net)s.")
 
 
+class AciDriverConfigMissingSegmentationId(n_exc.BadRequest):
+    message = _("The ACI Driver config is missing a segmentation_id "
+                "parameter for %(ext_net)s.")
+
+
 class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
     """Driver class for Cisco ACI-based devices.
 
@@ -156,6 +161,7 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
         # network names in GBP workflow need to be reduced, since
         # the network may contain UUIDs
         external_network = self.get_ext_net_name(network['name'])
+        # TODO(tbachman): see if we can get rid of the default
         transit_net = self.transit_nets_cfg.get(
             external_network) or self._default_ext_dict
         return transit_net, network
@@ -224,12 +230,6 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
             hosting_info['cidr_exposed'] = ext_dict['cidr_exposed']
             hosting_info['gateway_ip'] = ext_dict['gateway_ip']
         else:
-            # If an OpFlex network is used on the external network,
-            # the actual segment ID comes from the confgi file
-            if net.get('provider:network_type') == 'opflex':
-                if ext_dict.get('segmentation_id'):
-                    hosting_info['segmentation_id'] = (
-                        ext_dict['segmentation_id'])
             snat_subnets = self._core_plugin.get_subnets(
                 context.elevated(), {'name': [APIC_SNAT]})
             if snat_subnets:
@@ -254,11 +254,19 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
         # If this is a router interface, the VLAN comes from APIC.
         # If it's the gateway, the VLAN comes from the segment ID
         if port_db.get('device_owner') == DEVICE_OWNER_ROUTER_GW:
+            ext_dict, net = self._get_external_network_dict(context, port_db)
+            # If an OpFlex network is used on the external network,
+            # the actual segment ID comes from the confgi file
+            if net.get('provider:network_type') == 'opflex':
+                if ext_dict.get('segmentation_id'):
+                    return {'allocated_port_id': port_db.id,
+                            'allocated_vlan': ext_dict['segmentation_id']}
+                else:
+                    raise AciDriverConfigMissingSegmentationId(ext_net=net)
             return super(AciVLANTrunkingPlugDriver,
                          self).allocate_hosting_port(
                              context, router_id,
-                             port_db, network_type, hosting_device_id
-                         )
+                             port_db, network_type, hosting_device_id)
 
         # shouldn't happen, but just in case
         if port_db.get('device_owner') != DEVICE_OWNER_ROUTER_INTF:
