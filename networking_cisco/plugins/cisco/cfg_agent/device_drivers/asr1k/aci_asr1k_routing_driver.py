@@ -129,9 +129,9 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             out_itfc = self._get_interface_name_from_hosting_port(port)
             ip = netaddr.IPNetwork(cidr)
             subnet, mask = ip.network.format(), ip.netmask.format()
-            next_hop = self._get_interface_next_hop_from_hosting_port(port)
+            gateway_ip = self._get_interface_gateway_ip_from_hosting_port(port)
             conf_str = snippets.SET_TENANT_ROUTE_WITH_INTF % (
-                vrf_name, subnet, mask, out_itfc, next_hop)
+                vrf_name, subnet, mask, out_itfc, gateway_ip)
             self._edit_running_config(conf_str, 'SET_TENANT_ROUTE_WITH_INTF')
 
     def _remove_tenant_net_route(self, ri, port):
@@ -141,9 +141,9 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             out_itfc = self._get_interface_name_from_hosting_port(port)
             ip = netaddr.IPNetwork(cidr)
             subnet, mask = ip.network.format(), ip.netmask.format()
-            next_hop = self._get_interface_next_hop_from_hosting_port(port)
+            gateway_ip = self._get_interface_gateway_ip_from_hosting_port(port)
             conf_str = snippets.REMOVE_TENANT_ROUTE_WITH_INTF % (
-                vrf_name, subnet, mask, out_itfc, next_hop)
+                vrf_name, subnet, mask, out_itfc, gateway_ip)
             self._edit_running_config(conf_str,
                                       'REMOVE_TENANT_ROUTE_WITH_INTF')
 
@@ -156,19 +156,19 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             return port['fixed_ips'][0]['ip_address']
         else:
             try:
-                ip = port['hosting_info']['gateway_ip']
-                return ip
+                cidr = port['hosting_info']['cidr_exposed']
+                return cidr.split("/")[0]
             except KeyError as e:
                 params = {'key': e}
                 raise cfg_exc.DriverExpectedKeyNotSetException(**params)
 
-    def _get_interface_next_hop_from_hosting_port(self, port):
+    def _get_interface_gateway_ip_from_hosting_port(self, port):
         """
         Extract the next hop IP for a subinterface
         e.g. 1.103.2.254
         """
         try:
-            ip = port['hosting_info']['next_hop']
+            ip = port['hosting_info']['gateway_ip']
             return ip
         except KeyError as e:
             params = {'key': e}

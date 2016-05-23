@@ -63,10 +63,9 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         self.ri = routing_svc_helper.RouterInfo(FAKE_ID, self.router)
         self.vrf = self.ri.router['tenant_id']
         self.driver._get_vrfs = mock.Mock(return_value=[self.vrf])
-        self.transit_next_hop = '1.103.2.254'
-        self.transit_gw_ip = '1.103.2.1'
+        self.transit_gw_ip = '1.103.2.254'
         self.transit_gw_vip = '1.103.2.2'
-        self.transit_cidr = '1.103.2.0/24'
+        self.transit_cidr = '1.103.2.1/24'
         self.transit_vlan = '1035'
         self.int_port = {'id': PORT_ID,
                          'ip_cidr': self.gw_ip_cidr,
@@ -77,7 +76,6 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
                              'physical_interface': self.phy_infc,
                              'segmentation_id': self.transit_vlan,
                              'gateway_ip': self.transit_gw_ip,
-                             'next_hop': self.transit_next_hop,
                              'cidr_exposed': self.transit_cidr
                          },
                          HA_INFO: self.gw_ha_info}
@@ -124,14 +122,14 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         net = netaddr.IPNetwork(self.gw_ip_cidr).network
         mask = netaddr.IPNetwork(self.gw_ip_cidr).netmask
         cfg_args_route = (self.vrf, net, mask, sub_interface,
-            self.transit_next_hop)
+            self.transit_gw_ip)
         self.assert_edit_run_cfg(
             snippets.SET_TENANT_ROUTE_WITH_INTF, cfg_args_route)
 
         sub_interface = self.phy_infc + '.' + str(self.transit_vlan)
         mask = netaddr.IPNetwork(self.transit_cidr).netmask
         cfg_args_sub = (sub_interface, self.transit_vlan, self.vrf,
-                        self.transit_gw_ip, mask)
+                        self.transit_cidr.split("/")[0], mask)
         self.assert_edit_run_cfg(
             asr_snippets.CREATE_SUBINTERFACE_WITH_ID, cfg_args_sub)
 
@@ -157,14 +155,14 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         net = netaddr.IPNetwork(self.gw_ip_cidr).network
         mask = netaddr.IPNetwork(self.gw_ip_cidr).netmask
         cfg_args_route = (vrf, net, mask, sub_interface,
-            self.transit_next_hop)
+            self.transit_gw_ip)
         self.assert_edit_run_cfg(
             snippets.SET_TENANT_ROUTE_WITH_INTF, cfg_args_route)
 
         sub_interface = self.phy_infc + '.' + str(self.transit_vlan)
         mask = netaddr.IPNetwork(self.transit_cidr).netmask
         cfg_args_sub = (sub_interface, region_id, self.transit_vlan, vrf,
-                        self.transit_gw_ip, mask)
+                        self.transit_cidr.split("/")[0], mask)
         self.assert_edit_run_cfg(
             asr_snippets.CREATE_SUBINTERFACE_REGION_ID_WITH_ID, cfg_args_sub)
 
