@@ -40,9 +40,8 @@ ACI_ASR1K_DRIVER_OPTS = [
 
 cfg.CONF.register_opts(ACI_ASR1K_DRIVER_OPTS, "general")
 
-DEFAULT_EXT_DICT = {'gateway_ip': '1.103.2.1',
-                    'next_hop': '1.103.2.254',
-                    'cidr_exposed': '1.103.2.0/24'}
+DEFAULT_EXT_DICT = {'gateway_ip': '1.103.2.254',
+                    'cidr_exposed': '1.103.2.1/24'}
 
 
 class AciDriverConfigMissingGatewayIp(n_exc.BadRequest):
@@ -52,11 +51,6 @@ class AciDriverConfigMissingGatewayIp(n_exc.BadRequest):
 
 class AciDriverConfigMissingCidrExposed(n_exc.BadRequest):
     message = _("The ACI Driver config is missing a cidr_exposed "
-                "parameter for %(ext_net)s.")
-
-
-class AciDriverConfigMissingNextHop(n_exc.BadRequest):
-    message = _("The ACI Driver config is missing a next_hop "
                 "parameter for %(ext_net)s.")
 
 
@@ -88,8 +82,6 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
                 raise AciDriverConfigMissingGatewayIp(ext_net=network)
             if config.get(network).get('cidr_exposed') is None:
                 raise AciDriverConfigMissingCidrExposed(ext_net=network)
-            if config.get(network).get('next_hop') is None:
-                raise AciDriverConfigMissingNextHop(ext_net=network)
 
     @property
     def transit_nets_cfg(self):
@@ -230,7 +222,6 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
         ext_dict, net = self._get_external_network_dict(context, port_db)
         if not is_external:
             hosting_info['cidr_exposed'] = ext_dict['cidr_exposed']
-            hosting_info['next_hop'] = ext_dict['next_hop']
             hosting_info['gateway_ip'] = ext_dict['gateway_ip']
         else:
             # If an OpFlex network is used on the external network,

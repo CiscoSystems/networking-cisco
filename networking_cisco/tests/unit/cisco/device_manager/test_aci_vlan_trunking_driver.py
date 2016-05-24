@@ -415,18 +415,16 @@ class TestAciVLANTrunkingPlugDriver(
     def test_config_sanity_check(self):
         test_config = {
             'Datacenter-Out': {
-                'gateway_ip': '1.103.2.1',
-                'next_hop': '1.103.2.254',
-                'cidr_exposed': '1.103.2.0/24',
+                'gateway_ip': '1.103.2.254',
+                'cidr_exposed': '1.103.2.1/24',
             }
         }
         self.plugging_driver._sanity_check_config(test_config)
 
     def test_extend_hosting_port_info_adds_segment_id(self):
         self.plugging_driver._default_ext_dict = {
-            'gateway_ip': '1.103.2.1',
-            'next_hop': '1.103.2.254',
-            'cidr_exposed': '1.103.2.0/24',
+            'gateway_ip': '1.103.2.254',
+            'cidr_exposed': '1.103.2.1/24',
             'interface_config': 'testinfo1',
             'segmentation_id': 3003
         }
