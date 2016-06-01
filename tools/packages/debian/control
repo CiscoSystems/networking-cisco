@@ -9,7 +9,7 @@ Vcs-Browser: https://github.com/CiscoSystems/networking-cisco
 
 Package: networking-cisco
 Architecture: all
-Depends: ${misc:Depends}, python-ncclient, python-ciscoconfparse,
+Depends: ${misc:Depends}, python-ncclient,
          python-novaclient, python-ucssdk
 Description: Neutron layer 3 plugin for Cisco devices
  Provides Layer 3 support for Cisco routing products

@@ -34,7 +34,6 @@ from networking_cisco.tests.unit.cisco.cfg_agent import (
 from neutron.common import constants as l3_constants
 
 sys.modules['ncclient'] = mock.MagicMock()
-sys.modules['ciscoconfparse'] = mock.MagicMock()
 
 _uuid = uuidutils.generate_uuid
 HA_INFO = 'ha_info'
