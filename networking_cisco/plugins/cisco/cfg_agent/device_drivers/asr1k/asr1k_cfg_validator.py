@@ -14,7 +14,7 @@
 
 import netaddr
 
-from oslo_utils import importutils
+from networking_cisco.plugins.cisco.common.htparser import HTParser
 
 from neutron.common import constants
 
@@ -25,7 +25,6 @@ from networking_cisco.plugins.cisco.extensions import routerrole
 import re
 import xml.etree.ElementTree as ET
 
-ciscoconfparse = importutils.try_import('ciscoconfparse')
 
 ROUTER_ROLE_ATTR = routerrole.ROUTER_ROLE_ATTR
 
@@ -74,7 +73,7 @@ class ConfigValidator(object):
         segment_nat_dict = {}
         #conn = self.driver._get_connection() #TODO(init ncclient properly)
         running_cfg = self.get_running_config(self.conn)
-        parsed_cfg = ciscoconfparse.CiscoConfParse(running_cfg)
+        parsed_cfg = HTParser(running_cfg)
 
         self.populate_segment_nat_dict(segment_nat_dict, routers)
 
