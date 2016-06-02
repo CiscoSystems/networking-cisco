@@ -503,7 +503,7 @@ class L3RouterApplianceNoGbpTestCase(test_l3.L3NatTestCaseMixin,
 
     def test_create_floatingip_gbp(self):
         self.plugin._update_fip_assoc = mock.Mock()
-        self.plugin._create_floatingip = mock.Mock()
+        self.plugin._create_floatingip_neutron = mock.Mock()
         self.plugin._create_floatingip_gbp = mock.Mock()
         ctx = q_context.get_admin_context()
         floating_ip = {
@@ -511,7 +511,7 @@ class L3RouterApplianceNoGbpTestCase(test_l3.L3NatTestCaseMixin,
         }
         self.plugin.create_floatingip(ctx, floating_ip)
         self.plugin._create_floatingip_gbp.assert_not_called()
-        self.plugin._create_floatingip.assert_called_once_with(ctx,
+        self.plugin._create_floatingip_neutron.assert_called_once_with(ctx,
             floating_ip, initial_status=l3_constants.FLOATINGIP_STATUS_ACTIVE)
 
     def test_update_floatingip_no_gbp(self):

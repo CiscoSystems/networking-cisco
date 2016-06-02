@@ -543,7 +543,7 @@ class L3RouterApplianceDBMixin(extraroute_db.ExtraRoute_dbonly_mixin):
             return self._create_floatingip_gbp(context,
                 floatingip, initial_status=FLOATINGIP_STATUS_ACTIVE)
         else:
-            return self._create_floatingip(context,
+            return self._create_floatingip_neutron(context,
                 floatingip, initial_status=FLOATINGIP_STATUS_ACTIVE)
 
     def _create_floatingip_gbp(self, context, floatingip,
@@ -592,8 +592,8 @@ class L3RouterApplianceDBMixin(extraroute_db.ExtraRoute_dbonly_mixin):
         self._notify_affected_routers(context, router_ids, 'create_floatingip')
         return result
 
-    def _create_floatingip(self, context, floatingip,
-                           initial_status=FLOATINGIP_STATUS_ACTIVE):
+    def _create_floatingip_neutron(self, context, floatingip,
+                                   initial_status=FLOATINGIP_STATUS_ACTIVE):
         info = super(L3RouterApplianceDBMixin, self).create_floatingip(
             context, floatingip, initial_status)
         router_ids = [info['router_id']] if info['router_id'] else []
