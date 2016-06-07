@@ -127,8 +127,7 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
         return {'vrf_id': l3p['id']}
 
     def _get_vrf_context_neutron(self, context, router_id, port_db):
-        router = self.l3_plugin.get_router(context, router_id)
-        return {'vrf_id': router['tenant_id']}
+        return {'router_id': router_id}
 
     def _get_vrf_details_gbp(self, context, **kwargs):
         details = self.apic_driver.get_vrf_details(context, **kwargs)
@@ -140,7 +139,11 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
         return details
 
     def _get_vrf_details_neutron(self, context, **kwargs):
-        return self.apic_driver.get_vrf_details(context, **kwargs)
+        router = self.l3_plugin.get_router(context, kwargs['router_id'])
+        vrf_info = self.apic_driver.get_router_vrf_and_tenant(router)
+        vrf_info['vrf_name'] = vrf_info['aci_name']
+        vrf_info['vrf_tenant'] = vrf_info['aci_tenant']
+        return vrf_info
 
     def _get_external_network_dict(self, context, port_db):
         """Get external network information
