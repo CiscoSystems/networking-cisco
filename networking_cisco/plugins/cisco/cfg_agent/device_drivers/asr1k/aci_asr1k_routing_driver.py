@@ -343,11 +343,9 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
         vrf_name = self._get_vrf_name(ri)
         for subnet in gw_port['hosting_info'].get('snat_subnets', []):
             net = netaddr.IPNetwork(subnet['cidr'])
-            pool_start = str(netaddr.IPAddress(net.first + 2))
-            pool_end = str(netaddr.IPAddress(net.first + 2))
             pool_name = "%s_nat_pool" % (vrf_name)
-            self._do_set_snat_pool(pool_name, pool_start,
-                                   pool_end, str(net.netmask), is_delete)
+            self._do_set_snat_pool(pool_name, subnet['ip'],
+                                   subnet['ip'], str(net.netmask), is_delete)
             secondary_ip = netaddr.IPAddress(net.value +
                                              (net.hostmask.value - 1))
             if is_delete:

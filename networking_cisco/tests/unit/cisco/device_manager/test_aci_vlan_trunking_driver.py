@@ -49,6 +49,31 @@ APIC_VLAN1 = 11
 APIC_VLAN2 = 22
 
 
+class FakePortDb(object):
+
+    def __init__(self, id, network_id, device_owner, device_id):
+        self.id = id
+        self.network_id = network_id
+        self.device_id = device_id
+        self.device_owner = device_owner
+        self.hosting_info = {}
+
+    def get(self, name):
+        return self[name]
+
+    def __getitem__(self, key):
+        if key == 'id':
+            return self.id
+        if key == 'network_id':
+            return self.network_id
+        if key == 'device_owner':
+            return self.device_owner
+        if key == 'device_id':
+            return self.device_id
+        if key == 'hosting_info':
+            return self.hosting_info
+
+
 class TestAciVLANTrunkingPlugDriver(
     test_l3_router_appliance_plugin.L3RouterApplianceTestCaseBase,
     test_l3.L3NatTestCaseMixin):
@@ -60,54 +85,6 @@ class TestAciVLANTrunkingPlugDriver(
     def setUp(self):
         super(TestAciVLANTrunkingPlugDriver, self).setUp(
             create_mgmt_nw=False)
-        self.details = {
-            "subnets": [
-                {"ipv6_ra_mode": None,
-                 "allocation_pools": [
-                     {"start": "172.24.4.2",
-                      "end": "172.24.4.254"}
-                 ],
-                 "host_routes": [
-                     {"nexthop": "172.24.4.1",
-                      "destination": "0.0.0.0/0"}
-                 ],
-                 "dhcp_server_ips": [],
-                 "ipv6_address_mode": None,
-                 "cidr": "172.24.4.0/24",
-                 "id": "63e21e5e-7bd8-45bf-9c9d-5b270602c66b",
-                 "subnetpool_id": None,
-                 "name": "externalsubnet",
-                 "enable_dhcp": False,
-                 "network_id": "59cc5914-7f34-42b0-9d9d-047038916a73",
-                 "tenant_id": "304802c0894649c0944a09b65f071cb9",
-                 "dns_nameservers": [],
-                 "gateway_ip": "172.24.4.1",
-                 "ip_version": 4L,
-                 "shared": True}
-            ],
-            "enable_metadata_optimization": False,
-            "allowed_address_pairs": [],
-            "vrf_tenant": "admin",
-            "segmentation_id": None,
-            "vrf_subnets": [],
-            "promiscuous_mode": False,
-            "ip_mapping": [],
-            "floating_ip": [],
-            "host": "",
-            "l3_policy_id": "304802c0894649c0944a09b65f071cb9",
-            "tenant_id": "304802c0894649c0944a09b65f071cb9",
-            "device": "7110878c-8674-4c88-9c04-08fd98251195",
-            "enable_dhcp_optimization": True,
-            "segment": {},
-            "port_id": "7110878c-8674-4c88-9c04-08fd98251195",
-            "host_snat_ips": [],
-            "app_profile_name": "openstack2",
-            "vrf_name": "shared",
-            "mac_address": "fa:16:3e:ae:90:0c",
-            "endpoint_group_name": "Datacenter-Out",
-            "ptg_tenant": "admin",
-            "network_type": None
-        }
         # save possible test_lib.test_config 'config_files' dict entry so we
         # can restore it after tests since we will change its value
         self._old_config_files = copy.copy(test_lib.test_config.get(
@@ -122,8 +99,6 @@ class TestAciVLANTrunkingPlugDriver(
         self.setup_config()
         self.plugin._core_plugin.mechanism_manager = mock.MagicMock()
         plug = aci_vlan.AciVLANTrunkingPlugDriver()
-        plug.apic_driver.get_gbp_details = mock.Mock(
-            return_value=self.details)
         plug.apic_driver.l3out_vlan_alloc.get_vlan_allocated = self._stub_vlan
         self.plugging_driver = plug
         self.vlan_dict = {'net1': APIC_VLAN1, 'net2': APIC_VLAN2}
@@ -224,41 +199,43 @@ class TestAciVLANTrunkingPlugDriver(
             with self.router(external_gateway_info=gw_info,
                              tenant_id=sn1['tenant_id']) as router1:
                 r1 = router1['router']
-                hosting_info = {}
-                fake_port_db_obj = mock.MagicMock()
-                fake_port_db_obj.hosting_info = mock.MagicMock()
-                fake_port_db_obj.hosting_info.segmentation_id = 50
-                fake_port_db_obj.device_owner = (
-                    l3_constants.DEVICE_OWNER_ROUTER_INTF)
-                fake_port_db_obj.device_id = r1['id']
-                fake_port_db_obj.network_id = sn1['network_id']
+                with self.network(name='Datacanter-Out') as network:
+                    net = network['network']
+                    hosting_info = {}
+                    fake_port_db_obj = FakePortDb('fakeuuid', net['id'],
+                        l3_constants.DEVICE_OWNER_ROUTER_INTF, r1['id'])
+                    fake_port_db_obj.hosting_info['segmentation_id'] = 50
+                    hosting_device = {'id':
+                        '00000000-0000-0000-0000-000000000002'}
+                    tenant_id = 'tenant_uuid1'
+                    ctx = context.Context('', tenant_id, is_admin=True)
+                    self.plugging_driver.extend_hosting_port_info(ctx,
+                        fake_port_db_obj, hosting_device, hosting_info)
+                    self.assertEqual(hosting_info['physical_interface'],
+                                     'GigabitEthernet/1/0/1')
+                    self.assertEqual(hosting_info['segmentation_id'], 50)
+
+    def test_extend_hosting_port_info_adds_segmentation_id_external(self):
+        with self.subnet() as subnet1:
+            sn1 = subnet1['subnet']
+            ext_net_id = sn1['network_id']
+            self._set_net_external(ext_net_id)
+            hosting_info = {}
+            gw_info = {'network_id': ext_net_id}
+            with self.router(external_gateway_info=gw_info,
+                             tenant_id=sn1['tenant_id']) as router1:
+                r1 = router1['router']
+                fake_port_db_obj = FakePortDb('fakeuuid', sn1['network_id'],
+                    l3_constants.DEVICE_OWNER_ROUTER_GW, r1['id'])
+                fake_port_db_obj.hosting_info['segmentation_id'] = 40
                 hosting_device = {'id': '00000000-0000-0000-0000-000000000002'}
                 tenant_id = 'tenant_uuid1'
                 ctx = context.Context('', tenant_id, is_admin=True)
                 self.plugging_driver.extend_hosting_port_info(ctx,
                     fake_port_db_obj, hosting_device, hosting_info)
                 self.assertEqual(hosting_info['physical_interface'],
-                                 'GigabitEthernet/1/0/1')
-                self.assertEqual(hosting_info['segmentation_id'], 50)
-
-    def test_extend_hosting_port_info_adds_segmentation_id_external(self):
-        with self.subnet() as subnet1:
-            sn1 = subnet1['subnet']
-            hosting_info = {}
-            fake_port_db_obj = mock.MagicMock()
-            fake_port_db_obj.hosting_info = mock.MagicMock()
-            fake_port_db_obj.hosting_info.segmentation_id = 40
-            fake_port_db_obj.device_owner = (
-                l3_constants.DEVICE_OWNER_ROUTER_GW)
-            fake_port_db_obj.network_id = sn1['network_id']
-            hosting_device = {'id': '00000000-0000-0000-0000-000000000002'}
-            tenant_id = 'tenant_uuid1'
-            ctx = context.Context('', tenant_id, is_admin=True)
-            self.plugging_driver.extend_hosting_port_info(ctx,
-                fake_port_db_obj, hosting_device, hosting_info)
-            self.assertEqual(hosting_info['physical_interface'],
-                             'GigabitEthernet/2/0/1')
-            self.assertEqual(hosting_info['segmentation_id'], 40)
+                                 'GigabitEthernet/2/0/1')
+                self.assertEqual(hosting_info['segmentation_id'], 40)
 
     # Had to create this b/c the helper won't let you set the name
     def _create_subnet_with_name(self, net_id, cidr, name):
@@ -276,25 +253,38 @@ class TestAciVLANTrunkingPlugDriver(
         return self.deserialize(self.fmt, subnet_res)
 
     def test_extend_hosting_port_info_adds_snat_subnets(self):
-        with self.network(name='Datacanter-Out') as network:
+        TEST_NET_NAME = 'Datacenter-Out'
+        FAKE_IP = '1.1.1.2'
+        FAKE_GW = '1.1.1.1'
+        self.plugging_driver.apic_driver.get_snat_ip_for_vrf = mock.Mock(
+            return_value={'external_segment_name': TEST_NET_NAME,
+                'host_snat_ip': FAKE_IP,
+                'gateway_ip': FAKE_GW,
+                'prefixlen': 24})
+        with self.network(name=TEST_NET_NAME) as network:
             net = network['network']
             subnet = self._create_subnet_with_name(net['id'],
                                                    '10.0.0.0/24', APIC_SNAT)
             sn1 = subnet['subnet']
-            hosting_info = {}
-            fake_port_db_obj = mock.MagicMock()
-            fake_port_db_obj.hosting_info = mock.MagicMock()
-            fake_port_db_obj.hosting_info.segmentation_id = 40
-            fake_port_db_obj.device_owner = (
-                l3_constants.DEVICE_OWNER_ROUTER_GW)
-            fake_port_db_obj.network_id = sn1['network_id']
-            hosting_device = {'id': '00000000-0000-0000-0000-000000000002'}
-            tenant_id = 'tenant_uuid1'
-            ctx = context.Context('', tenant_id, is_admin=True)
-            self.plugging_driver.extend_hosting_port_info(ctx,
-                fake_port_db_obj, hosting_device, hosting_info)
-            self.assertEqual(hosting_info['snat_subnets'],
-                             [{'id': sn1['id'], 'cidr': sn1['cidr']}])
+            ext_net_id = sn1['network_id']
+            self._set_net_external(ext_net_id)
+            gw_info = {'network_id': ext_net_id}
+            with self.router(external_gateway_info=gw_info,
+                             tenant_id=sn1['tenant_id']) as router1:
+                r1 = router1['router']
+                hosting_info = {}
+                fake_port_db_obj = FakePortDb('fakeuuid', sn1['network_id'],
+                    l3_constants.DEVICE_OWNER_ROUTER_GW, r1['id'])
+                fake_port_db_obj.hosting_info['segmentation_id'] = 40
+                hosting_device = {'id': '00000000-0000-0000-0000-000000000002'}
+                tenant_id = 'tenant_uuid1'
+                ctx = context.Context('', tenant_id, is_admin=True)
+                self.plugging_driver.extend_hosting_port_info(ctx,
+                    fake_port_db_obj, hosting_device, hosting_info)
+                self.assertEqual(hosting_info['snat_subnets'],
+                                 [{'id': sn1['id'],
+                                   'ip': FAKE_IP,
+                                   'cidr': sn1['cidr']}])
 
     def _update_provider_net_info(self, res_list, fields):
         for res in res_list:
