@@ -128,3 +128,29 @@ REMOVE_SECONDARY_IP = """
         </cli-config-data>
 </config>
 """
+
+# =============================================================================
+# Generic interface configuration command
+# Syntax: completely defined by parameter
+# =============================================================================
+SET_INTERFACE_CONFIG = """
+<config>
+        <cli-config-data>
+            <cmd>interface %s</cmd>
+            <cmd>%s</cmd>
+        </cli-config-data>
+</config>
+"""
+
+# =============================================================================
+# Generic interface configuration remove command
+# Syntax: completely defined by parameter
+# =============================================================================
+REMOVE_INTERFACE_CONFIG = """
+<config>
+        <cli-config-data>
+            <cmd>interface %s</cmd>
+            <cmd>no %s</cmd>
+        </cli-config-data>
+</config>
+"""

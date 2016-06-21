@@ -67,7 +67,16 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
                           "for router %(r_id)s", {'port': port, 'r_id': ri.id})
                 self._create_sub_interface(
                     ri, port, is_external=False)
-                self._add_tenant_net_route(ri, port)
+                # If interface config is present, then use that
+                # to perform additional configuration to the interface
+                # (used to configure dynamic routing per sub-interface).
+                # If it's not present, assume static routing is used,
+                # so configure routes for the tenant networks
+                if_configs = port['hosting_info'].get('interface_config')
+                if if_configs and isinstance(if_configs, list):
+                    self._set_subinterface(port, if_configs)
+                else:
+                    self._add_tenant_net_route(ri, port)
 
     def _create_sub_interface(self, ri, port, is_external=False, gw_ip=""):
         vlan = self._get_interface_vlan_from_hosting_port(port)
@@ -92,6 +101,20 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
                 params = {'r_id': ri.router_id, 'p_id': port['id'],
                           'port': port}
                 raise cfg_exc.HAParamsMissingException(**params)
+
+    def _set_subinterface(self, port, if_configs):
+        sub_interface = self._get_interface_name_from_hosting_port(port)
+        for if_config in if_configs:
+            conf_str = (snippets.SET_INTERFACE_CONFIG % (
+                           sub_interface, if_config))
+            self._edit_running_config(conf_str, 'SET_INTERFACE_CONFIG')
+
+    def _remove_subinterface(self, port, if_configs):
+        sub_interface = self._get_interface_name_from_hosting_port(port)
+        for if_config in if_configs:
+            conf_str = (snippets.REMOVE_INTERFACE_CONFIG % (
+                           sub_interface, if_config))
+            self._edit_running_config(conf_str, 'REMOVE_INTERFACE_CONFIG')
 
     def _add_ha_hsrp(self, ri, port, is_external=False):
         priority = None
@@ -190,7 +213,11 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
                 raise cfg_exc.DriverExpectedKeyNotSetException(**params)
 
     def internal_network_removed(self, ri, port):
-        self._remove_tenant_net_route(ri, port)
+        if_configs = port['hosting_info'].get('interface_config')
+        if if_configs and isinstance(if_configs, list):
+            self._remove_subinterface(port, if_configs)
+        else:
+            self._remove_tenant_net_route(ri, port)
 
     # ============== Internal "preparation" functions  ==============
 
