@@ -19,11 +19,15 @@ from oslo_config import cfg
 
 from networking_cisco.plugins.cisco.cfg_agent import cfg_exceptions as cfg_exc
 from networking_cisco.plugins.cisco.cfg_agent.device_drivers.asr1k import (
+    aci_asr1k_cfg_syncer as syncer)
+from networking_cisco.plugins.cisco.cfg_agent.device_drivers.asr1k import (
     aci_asr1k_snippets as snippets)
 from networking_cisco.plugins.cisco.cfg_agent.device_drivers.asr1k import (
     asr1k_routing_driver as asr1k)
 from networking_cisco.plugins.cisco.cfg_agent.device_drivers.asr1k import (
     asr1k_snippets)
+from networking_cisco.plugins.cisco.cfg_agent.service_helpers import (
+    routing_svc_helper as helper)
 from networking_cisco.plugins.cisco.common import cisco_constants
 from networking_cisco.plugins.cisco.extensions import ha
 from networking_cisco.plugins.cisco.extensions import routerrole
@@ -221,18 +225,24 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
 
     # ============== Internal "preparation" functions  ==============
 
+    def cleanup_invalid_cfg(self, hd, routers):
+
+        cfg_syncer = syncer.ConfigSyncer(routers, self, hd)
+        cfg_syncer.delete_invalid_cfg()
+
     def _get_vrf_name(self, ri):
         """
         For ACI, a tenant is mapped to a VRF.
         """
-        tenant_id = ri.router['tenant_id']
+        router_id = (helper.N_ROUTER_PREFIX +
+                     ri.router['tenant_id'])[:self.DEV_NAME_LEN]
         is_multi_region_enabled = cfg.CONF.multi_region.enable_multi_region
 
         if is_multi_region_enabled:
             region_id = cfg.CONF.multi_region.region_id
-            vrf_name = "%s-%s" % (tenant_id, region_id)
+            vrf_name = "%s-%s" % (router_id, region_id)
         else:
-            vrf_name = tenant_id
+            vrf_name = router_id
         return vrf_name
 
     def _add_floating_ip(self, ri, ex_gw_port, floating_ip, fixed_ip):

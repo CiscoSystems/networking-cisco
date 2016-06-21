@@ -27,6 +27,8 @@ from networking_cisco.plugins.cisco.cfg_agent.device_drivers.asr1k import (
     asr1k_snippets as asr_snippets)
 from networking_cisco.plugins.cisco.cfg_agent.device_drivers.csr1kv import (
     cisco_csr1kv_snippets as csr_snippets)
+from networking_cisco.plugins.cisco.cfg_agent.device_drivers.csr1kv import (
+    iosxe_routing_driver as iosxe_driver)
 from networking_cisco.plugins.cisco.cfg_agent.service_helpers import (
     routing_svc_helper)
 from networking_cisco.tests.unit.cisco.cfg_agent import (
@@ -60,7 +62,9 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         self.ri_global.router['tenant_id'] = _uuid()
         self.router['tenant_id'] = _uuid()
         self.ri = routing_svc_helper.RouterInfo(FAKE_ID, self.router)
-        self.vrf = self.ri.router['tenant_id']
+        self.vrf = ('nrouter-' +
+                    self.ri.router['tenant_id'])[
+                        :iosxe_driver.IosXeRoutingDriver.DEV_NAME_LEN]
         self.driver._get_vrfs = mock.Mock(return_value=[self.vrf])
         self.transit_gw_ip = '1.103.2.254'
         self.transit_gw_vip = '1.103.2.2'
@@ -107,9 +111,11 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         self.ri.internal_ports = int_ports
         self.ri_global.internal_ports = int_ports
         self.TEST_CIDR = '20.0.0.0/24'
+        self.TEST_SNAT_IP = '20.0.0.2'
         self.TEST_SNAT_ID = _uuid()
         self.ex_gw_port['hosting_info']['snat_subnets'] = [
             {'id': self.TEST_SNAT_ID,
+             'ip': self.TEST_SNAT_IP,
              'cidr': self.TEST_CIDR}
         ]
         net = netaddr.IPNetwork(self.TEST_CIDR)
