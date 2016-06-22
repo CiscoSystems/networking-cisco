@@ -47,6 +47,10 @@ DEFAULT_EXT_DICT = {'gateway_ip': '1.103.2.254',
                     'cidr_exposed': '1.103.2.1/24'}
 
 
+class AciDriverConfigInvalidFileFormat(n_exc.BadRequest):
+    message = _("The ACI Driver config file format is invalid")
+
+
 class AciDriverConfigMissingGatewayIp(n_exc.BadRequest):
     message = _("The ACI Driver config is missing a gateway_ip "
                 "parameter for %(ext_net)s.")
@@ -95,7 +99,11 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
     def transit_nets_cfg(self):
         if self._cfg_file:
             networks_dict = open(self._cfg_file, 'r').read()
-            self._transit_nets_cfg = eval(networks_dict)
+            try:
+                self._transit_nets_cfg = eval(networks_dict)
+                self._sanity_check_config(self._transit_nets_cfg)
+            except SyntaxError:
+                raise AciDriverConfigInvalidFileFormat
         else:
             self._transit_nets_cfg = {}
         return self._transit_nets_cfg
@@ -235,6 +243,8 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
         if not is_external:
             hosting_info['cidr_exposed'] = ext_dict['cidr_exposed']
             hosting_info['gateway_ip'] = ext_dict['gateway_ip']
+            if ext_dict.get('interface_config'):
+                hosting_info['interface_config'] = ext_dict['interface_config']
         else:
             router_id = port_db.device_id
             router = self.l3_plugin.get_router(context, router_id)
