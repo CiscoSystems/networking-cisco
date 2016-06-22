@@ -86,7 +86,6 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
         self._default_ext_dict = DEFAULT_EXT_DICT
         self._transit_nets_cfg = {}
         self._get_vrf_context = None
-        self._get_vrf_details = None
 
     def _sanity_check_config(self, config):
         for network in config.keys():
@@ -123,24 +122,10 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
         else:
             return None
 
-    @property
-    def get_vrf_details(self):
-        if self.apic_driver:
-            return self._get_vrf_details
-        else:
-            return None
-
     def _get_vrf_context_gbp(self, context, router_id, port_db):
-        l2p = self.apic_driver._network_id_to_l2p(
-            context, port_db['network_id'])
-        l3p = self.apic_driver.gbp_plugin.get_l3_policy(
-            context, l2p['l3_policy_id'])
-        return {'vrf_id': l3p['id']}
-
-    def _get_vrf_context_neutron(self, context, router_id, port_db):
-        return {'router_id': router_id}
-
-    def _get_vrf_details_gbp(self, context, **kwargs):
+        l3p_list = self.apic_driver.gbp_plugin.get_l3_policies(
+            context.elevated(), {'router': [router_id]})
+        kwargs = {'vrf_id': l3p_list[0]['id']}
         details = self.apic_driver.get_vrf_details(context, **kwargs)
         # The L3 out VLAN allocation uses UUIDs instead of names
         details['vrf_name'] = details['l3_policy_id']
@@ -149,12 +134,13 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
             details['vrf_tenant'] = None
         return details
 
-    def _get_vrf_details_neutron(self, context, **kwargs):
-        router = self.l3_plugin.get_router(context, kwargs['router_id'])
+    def _get_vrf_context_neutron(self, context, router_id, port_db):
+        router = self.l3_plugin.get_router(context, router_id)
         vrf_info = self.apic_driver.get_router_vrf_and_tenant(router)
-        vrf_info['vrf_name'] = vrf_info['aci_name']
-        vrf_info['vrf_tenant'] = vrf_info['aci_tenant']
-        return vrf_info
+        details = {}
+        details['vrf_name'] = vrf_info['aci_name']
+        details['vrf_tenant'] = vrf_info['aci_tenant']
+        return details
 
     def _get_external_network_dict(self, context, port_db):
         """Get external network information
@@ -205,7 +191,6 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
                             'apic'].obj)
                 self._get_ext_net_name = self._get_ext_net_name_gbp
                 self._get_vrf_context = self._get_vrf_context_gbp
-                self._get_vrf_details = self._get_vrf_details_gbp
             except KeyError:
                     LOG.info(_("GBP service plugin not present -- will "
                                "try APIC ML2 plugin."))
@@ -216,11 +201,24 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
                             'cisco_apic_ml2'].obj)
                     self._get_ext_net_name = self._get_ext_net_name_neutron
                     self._get_vrf_context = self._get_vrf_context_neutron
-                    self._get_vrf_details = self._get_vrf_details_neutron
                 except KeyError:
                     LOG.error(_("APIC ML2 plugin not present: "
                                 "no APIC ML2 driver could be found."))
         return self._apic_driver
+
+    def _add_snat_info(self, context, router, net, hosting_info):
+        if net:
+            snat_ips = self.apic_driver.get_snat_ip_for_vrf(context,
+                router['tenant_id'], net)
+            snat_subnets = self._core_plugin.get_subnets(
+                context.elevated(), {'name': [APIC_SNAT]})
+            if snat_subnets and snat_ips:
+                hosting_info['snat_subnets'] = []
+                for subnet in snat_subnets:
+                    snat_subnet = {'id': subnet['id'],
+                                   'ip': snat_ips['host_snat_ip'],
+                                   'cidr': subnet['cidr']}
+                    hosting_info['snat_subnets'].append(snat_subnet)
 
     def extend_hosting_port_info(self, context, port_db, hosting_device,
                                  hosting_info):
@@ -252,17 +250,10 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
             # empty-string tenant IDs
             if router.get(ROUTER_ROLE_ATTR):
                 return
-            snat_ips = self.apic_driver.get_snat_ip_for_vrf(context,
-                router['tenant_id'], net)
-            snat_subnets = self._core_plugin.get_subnets(
-                context.elevated(), {'name': [APIC_SNAT]})
-            if snat_subnets and snat_ips:
-                hosting_info['snat_subnets'] = []
-                for subnet in snat_subnets:
-                    snat_subnet = {'id': subnet['id'],
-                                   'ip': snat_ips['host_snat_ip'],
-                                   'cidr': subnet['cidr']}
-                    hosting_info['snat_subnets'].append(snat_subnet)
+            if ext_dict.get('global_config'):
+                hosting_info['global_config'] = (
+                    ext_dict['global_config'])
+            self._add_snat_info(context, router, net, hosting_info)
 
     def allocate_hosting_port(self, context, router_id, port_db, network_type,
                               hosting_device_id):
@@ -312,8 +303,7 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
         l3out_network = networks[0]
         l3out_name = self.get_ext_net_name(l3out_network['name'])
         # For VLAN apic driver provides VLAN tag
-        kwargs = self.get_vrf_context(context, router_id, port_db)
-        details = self.get_vrf_details(context, **kwargs)
+        details = self.get_vrf_context(context, router_id, port_db)
         if details is None:
             LOG.debug('aci_vlan_trunking_driver: No vrf_details')
             return

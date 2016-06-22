@@ -65,11 +65,14 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         self.vrf = ('nrouter-' +
                     self.ri.router['tenant_id'])[
                         :iosxe_driver.IosXeRoutingDriver.DEV_NAME_LEN]
+        self.vrf_pid = int(self.ri.router['tenant_id'][:4], 16)
         self.driver._get_vrfs = mock.Mock(return_value=[self.vrf])
         self.transit_gw_ip = '1.103.2.254'
         self.transit_gw_vip = '1.103.2.2'
         self.transit_cidr = '1.103.2.1/24'
         self.transit_vlan = '1035'
+        self.GLOBAL_CFG_STRING_1 = 'router ospf {vrf_pid} vrf {vrf}'
+        self.GLOBAL_CFG_STRING_2 = 'area 0.0.0.1 nssa'
         self.int_port_w_config = (
             {'id': PORT_ID,
              'ip_cidr': self.gw_ip_cidr,
@@ -118,6 +121,8 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
              'ip': self.TEST_SNAT_IP,
              'cidr': self.TEST_CIDR}
         ]
+        self.ex_gw_port['hosting_info']['global_config'] = [
+            [self.GLOBAL_CFG_STRING_1, self.GLOBAL_CFG_STRING_2]]
         net = netaddr.IPNetwork(self.TEST_CIDR)
         self.TEST_CIDR_SNAT_IP = str(netaddr.IPAddress(net.first + 2))
         self.TEST_CIDR_SECONDARY_IP = str(netaddr.IPAddress(net.last - 1))
@@ -183,6 +188,7 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
             self.transit_vlan)
         self.assert_edit_run_cfg(
             asr_snippets.SET_INTC_ASR_HSRP_EXTERNAL, cfg_args_hsrp)
+        self.port = self.int_port
 
     def test_internal_network_added_with_multi_region(self):
         cfg.CONF.set_override('enable_multi_region', True, 'multi_region')
@@ -223,6 +229,40 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         self.port = self.gw_port
         super(ASR1kRoutingDriverAci,
             self).test_internal_network_added_global_router()
+        self.port = self.int_port
+
+    def test_external_gateway_added_global_config(self):
+        # global router uses the ex_gw_port
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
+        self.driver.external_gateway_added(self.ri, self.ex_gw_port)
+        sub_interface = self.phy_infc + '.' + str(self.vlan_ext)
+        self.assert_edit_run_cfg(csr_snippets.ENABLE_INTF, sub_interface)
+        cfg_params_nat = (self.vrf + '_nat_pool', self.TEST_CIDR_SNAT_IP,
+                          self.TEST_CIDR_SNAT_IP, self.ex_gw_ip_mask)
+        self.assert_edit_run_cfg(asr_snippets.CREATE_NAT_POOL, cfg_params_nat)
+
+        cfg_global = snippets.GLOBAL_CONFIG_PREFIX
+        cfg_global += snippets.SET_GLOBAL_CONFIG % (
+            self.GLOBAL_CFG_STRING_1.format(
+                vrf=self.vrf, vrf_pid=self.vrf_pid))
+        cfg_global += snippets.SET_GLOBAL_CONFIG % (self.GLOBAL_CFG_STRING_2)
+        cfg_global += snippets.GLOBAL_CONFIG_POSTFIX
+        self.assert_edit_run_cfg(cfg_global, None)
+
+    def test_external_gateway_removed_global_config(self):
+        self.driver._do_remove_sub_interface = mock.MagicMock()
+        # global router uses the ex_gw_port
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
+        self.driver.external_gateway_removed(self.ri, self.ex_gw_port)
+
+        cfg_global = snippets.GLOBAL_CONFIG_PREFIX
+        cfg_global += snippets.REMOVE_GLOBAL_CONFIG % (
+            self.GLOBAL_CFG_STRING_1.format(
+                vrf=self.vrf, vrf_pid=self.vrf_pid))
+        cfg_global += snippets.REMOVE_GLOBAL_CONFIG % (
+            self.GLOBAL_CFG_STRING_2)
+        cfg_global += snippets.GLOBAL_CONFIG_POSTFIX
+        self.assert_edit_run_cfg(cfg_global, None)
         self.port = self.int_port
 
     def test_internal_network_added_global_router_with_multi_region(self):
@@ -273,6 +313,7 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         cfg_args_route = (sub_interface, 'testroute2')
         self.assert_edit_run_cfg(
             snippets.REMOVE_INTERFACE_CONFIG, cfg_args_route)
+        self.port = self.int_port
 
     def _next_ip(self, curr_ip):
         ip = netaddr.IPAddress(curr_ip)

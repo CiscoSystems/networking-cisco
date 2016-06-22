@@ -54,6 +54,8 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
         self._deployment_id = "zxy"
         self.hosting_device = {'id': device_params.get('id'),
                                'device_id': device_params.get('device_id')}
+        self._template_dict = {'vrf': self._set_vrf,
+                               'vrf_pid': self._set_vrf_pid}
 
     # ============== Public functions ==============
 
@@ -78,9 +80,17 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
                 # so configure routes for the tenant networks
                 if_configs = port['hosting_info'].get('interface_config')
                 if if_configs and isinstance(if_configs, list):
-                    self._set_subinterface(port, if_configs)
+                    self._set_subinterface(ri, port, if_configs)
                 else:
                     self._add_tenant_net_route(ri, port)
+
+    def external_gateway_removed(self, ri, ext_gw_port):
+        super(AciASR1kRoutingDriver, self).external_gateway_removed(ri,
+            ext_gw_port)
+        if not self._is_global_router(ri):
+            g_configs = ext_gw_port['hosting_info'].get('global_config')
+            if g_configs and isinstance(g_configs, list):
+                self._remove_global_config(ri, ext_gw_port, g_configs)
 
     def _create_sub_interface(self, ri, port, is_external=False, gw_ip=""):
         vlan = self._get_interface_vlan_from_hosting_port(port)
@@ -93,6 +103,11 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             is_external=is_external)
         net_mask = self._get_interface_subnet_from_hosting_port(port,
             is_external=is_external)
+        # If the router's gateway isn't set, then we can't get the
+        # relevant information -- skip configuration
+        if hsrp_ip is None or net_mask is None:
+            return
+
         sub_interface = self._get_interface_name_from_hosting_port(port)
         self._do_create_sub_interface(sub_interface, vlan, vrf_name, hsrp_ip,
                                       net_mask, is_external)
@@ -106,18 +121,18 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
                           'port': port}
                 raise cfg_exc.HAParamsMissingException(**params)
 
-    def _set_subinterface(self, port, if_configs):
+    def _set_subinterface(self, ri, port, if_configs):
         sub_interface = self._get_interface_name_from_hosting_port(port)
         for if_config in if_configs:
-            conf_str = (snippets.SET_INTERFACE_CONFIG % (
-                           sub_interface, if_config))
+            conf_str = (snippets.SET_INTERFACE_CONFIG % (sub_interface,
+                (self._replace_template_vars(ri, port, if_config))))
             self._edit_running_config(conf_str, 'SET_INTERFACE_CONFIG')
 
-    def _remove_subinterface(self, port, if_configs):
+    def _remove_subinterface(self, ri, port, if_configs):
         sub_interface = self._get_interface_name_from_hosting_port(port)
         for if_config in if_configs:
-            conf_str = (snippets.REMOVE_INTERFACE_CONFIG % (
-                           sub_interface, if_config))
+            conf_str = (snippets.REMOVE_INTERFACE_CONFIG % (sub_interface,
+                (self._replace_template_vars(ri, port, if_config))))
             self._edit_running_config(conf_str, 'REMOVE_INTERFACE_CONFIG')
 
     def _add_ha_hsrp(self, ri, port, is_external=False):
@@ -157,6 +172,9 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             ip = netaddr.IPNetwork(cidr)
             subnet, mask = ip.network.format(), ip.netmask.format()
             gateway_ip = self._get_interface_gateway_ip_from_hosting_port(port)
+            # If the gateway isn't set, then we can't set the route
+            if not gateway_ip:
+                return
             conf_str = snippets.SET_TENANT_ROUTE_WITH_INTF % (
                 vrf_name, subnet, mask, out_itfc, gateway_ip)
             self._edit_running_config(conf_str, 'SET_TENANT_ROUTE_WITH_INTF')
@@ -219,7 +237,7 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
     def internal_network_removed(self, ri, port):
         if_configs = port['hosting_info'].get('interface_config')
         if if_configs and isinstance(if_configs, list):
-            self._remove_subinterface(port, if_configs)
+            self._remove_subinterface(ri, port, if_configs)
         else:
             self._remove_tenant_net_route(ri, port)
 
@@ -395,3 +413,59 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
     def _set_nat_pool(self, ri, gw_port, is_delete):
         if gw_port['hosting_info'].get('snat_subnets'):
             self._set_snat_pools_from_hosting_info(ri, gw_port, is_delete)
+
+    def _handle_external_gateway_added_normal_router(self, ri, ext_gw_port):
+        super(AciASR1kRoutingDriver,
+              self)._handle_external_gateway_added_normal_router(ri,
+                  ext_gw_port)
+        # Global conifguration parameters are passed using the user
+        # router. Check to see if there is any global config, and if it's
+        # not already configured, add it in
+        g_configs = ext_gw_port['hosting_info'].get('global_config')
+        if g_configs and isinstance(g_configs, list):
+            self._set_global_config(ri, ext_gw_port, g_configs)
+
+    def _set_global_config(self, ri, port, g_configs):
+        for g_config in g_configs:
+            asr_str = [snippets.GLOBAL_CONFIG_PREFIX]
+            self._config_cmd(ri, port, asr_str, g_config)
+            asr_str.append(snippets.GLOBAL_CONFIG_POSTFIX)
+            self._edit_running_config(''.join(asr_str), 'SET_GLOBAL_CONFIG')
+
+    def _remove_global_config(self, ri, port, g_configs):
+        for g_config in g_configs:
+            asr_str = [snippets.GLOBAL_CONFIG_PREFIX]
+            self._config_cmd(ri, port, asr_str, g_config, remove=True)
+            asr_str.append(snippets.GLOBAL_CONFIG_POSTFIX)
+            self._edit_running_config(''.join(asr_str), 'REMOVE_GLOBAL_CONFIG')
+
+    def _replace_template_vars(self, ri, port, config):
+        kwargs = {}
+        for key in self._template_dict.keys():
+            if '{' + key + '}' in config:
+                kwargs[key] = self._template_dict[key](ri, port, config)
+        return config.format(**kwargs)
+
+    def _config_cmd(self, ri, port, asr_str, g_config, remove=False):
+        if isinstance(g_config, list):
+            for config in g_config:
+                self._config_cmd(ri, port, asr_str, config, remove)
+        else:
+            if remove:
+                snippet = snippets.REMOVE_GLOBAL_CONFIG
+            else:
+                snippet = snippets.SET_GLOBAL_CONFIG
+            asr_str.append(snippet %
+                (self._replace_template_vars(ri, port, g_config)))
+
+    def _set_vrf(self, ri, port, config):
+        return self._get_vrf_name(ri)
+
+    def _set_vrf_pid(self, ri, port, config):
+        # Convert a VRF to a process iD for a router instance
+        vrf = self._get_vrf_name(ri)
+        # strip to 4 characters to limit pid to 16-bit value
+        # (limit on ASR)
+        # TODO(tbachman): fix to ensure PID uniqueness
+        pid = int(vrf.strip('nrouter-')[:4], 16)
+        return str(pid)
