@@ -20,7 +20,7 @@ from oslo_db import exception as db_exc
 from oslo_log import log as logging
 import six
 from sqlalchemy import exc as inner_db_exc
-
+from sqlalchemy.orm import exc as orm_exc
 
 from neutron.api.v2 import attributes
 from neutron import context as n_context
@@ -377,6 +377,15 @@ class L3RouterApplianceNamespaceTestCase(
         self._check_driver_calls(
             'test_router_update_gateway_to_empty_with_existed_floatingip', 1,
             1)
+
+    def test_disassociate_fips_call_update_port_description_failed(self):
+        with mock.patch('neutron.db.l3_db.L3_NAT_dbonly_mixin'
+                        '.disassociate_floatingips') as m:
+            m.side_effect = orm_exc.StaleDataError
+            self.assertEqual(
+                [],
+                self.plugin.disassociate_floatingips('fake_context',
+                                                     'fake_port_id'))
 
 
 class L3RouterApplianceVMTestCase(L3RouterApplianceNamespaceTestCase):

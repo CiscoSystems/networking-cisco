@@ -486,8 +486,14 @@ class L3RouterApplianceDBMixin(extraroute_db.ExtraRoute_dbonly_mixin):
         self._notify_affected_routers(context, router_ids, 'delete_floatingip')
 
     def disassociate_floatingips(self, context, port_id, do_notify=True):
-        router_ids = super(L3RouterApplianceDBMixin,
-                           self).disassociate_floatingips(context, port_id)
+        try:
+            router_ids = super(L3RouterApplianceDBMixin,
+                               self).disassociate_floatingips(context, port_id)
+        except exc.StaleDataError:
+            LOG.debug("Deletion of port %s during disassociate_floatingips "
+                      "and update of same port are being executed "
+                      "concurrently. Ignoring StaleDataError.", port_id)
+            return []
         if router_ids and do_notify:
             self._notify_affected_routers(context, list(router_ids),
                                           'disassociate_floatingips')
