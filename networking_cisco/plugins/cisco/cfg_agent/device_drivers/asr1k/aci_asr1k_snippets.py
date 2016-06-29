@@ -154,3 +154,27 @@ REMOVE_INTERFACE_CONFIG = """
         </cli-config-data>
 </config>
 """
+
+GLOBAL_CONFIG_PREFIX = """
+<config>
+        <cli-config-data>
+"""
+GLOBAL_CONFIG_POSTFIX = """
+        </cli-config-data>
+</config>
+"""
+# =============================================================================
+# Generic global configuration command
+# Syntax: completely defined by parameter
+# =============================================================================
+SET_GLOBAL_CONFIG = """
+            <cmd>%s</cmd>
+"""
+
+# =============================================================================
+# Generic global configuration remove command
+# Syntax: completely defined by parameter
+# =============================================================================
+REMOVE_GLOBAL_CONFIG = """
+            <cmd>no %s</cmd>
+"""
