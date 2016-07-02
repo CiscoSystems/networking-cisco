@@ -19,6 +19,7 @@ from oslo_log import log as logging
 
 from neutron.common import constants as l3_constants
 from neutron.common import exceptions as n_exc
+from neutron.extensions import l3
 from neutron import manager
 from neutron.plugins.common import constants as svc_constants
 
@@ -28,8 +29,10 @@ from networking_cisco.plugins.cisco.extensions import routerrole
 
 LOG = logging.getLogger(__name__)
 
+
 APIC_OWNED = 'apic_owned_'
 APIC_SNAT = 'host-snat-pool-for-internal-use'
+EXTERNAL_GW_INFO = l3.EXTERNAL_GW_INFO
 UUID_REGEX = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 DEVICE_OWNER_ROUTER_GW = l3_constants.DEVICE_OWNER_ROUTER_GW
 DEVICE_OWNER_ROUTER_INTF = l3_constants.DEVICE_OWNER_ROUTER_INTF
@@ -123,21 +126,26 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
             return None
 
     def _get_vrf_context_gbp(self, context, router_id, port_db):
+        # TODO(tbachman): inefficient - should be fixed
         l3p_list = self.apic_driver.gbp_plugin.get_l3_policies(
-            context.elevated(), {'router': [router_id]})
-        kwargs = {'vrf_id': l3p_list[0]['id']}
-        details = self.apic_driver.get_vrf_details(context, **kwargs)
-        # The L3 out VLAN allocation uses UUIDs instead of names
-        details['vrf_name'] = details['l3_policy_id']
-        # get rid of VRF tenant -- not needed  for GBP
-        if details.get('vrf_tenant'):
-            details['vrf_tenant'] = None
-        return details
+            context.elevated(), filters={'routers': [router_id]})
+        for l3p in l3p_list:
+            if l3p.get('routers') and router_id in l3p['routers']:
+                break
+        if not l3p_list or not l3p:
+            return None
+        return {'vrf_id': l3p['id'],
+                'vrf_name': l3p['id'],
+                'vrf_tenant': None}
 
     def _get_vrf_context_neutron(self, context, router_id, port_db):
         router = self.l3_plugin.get_router(context, router_id)
         vrf_info = self.apic_driver.get_router_vrf_and_tenant(router)
         details = {}
+        if self.apic_driver.per_tenant_context:
+            details['vrf_id'] = router['tenant_id']
+        else:
+            details['vrf_id'] = str(vrf_info['aci_name'])
         details['vrf_name'] = vrf_info['aci_name']
         details['vrf_tenant'] = vrf_info['aci_tenant']
         return details
@@ -155,8 +163,11 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
         else:
             router = self.l3_plugin.get_router(context,
                 port_db.device_id)
-            network_id = router['external_gateway_info']['network_id']
-            network = self._core_plugin.get_network(context, network_id)
+            ext_gw_info = router.get(EXTERNAL_GW_INFO)
+            if not ext_gw_info:
+                return {}, None
+            network = self._core_plugin.get_network(context,
+                ext_gw_info['network_id'])
 
         # network names in GBP workflow need to be reduced, since
         # the network may contain UUIDs
@@ -238,18 +249,20 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
         hosting_info['physical_interface'] = self._get_interface_info(
             hosting_device['id'], port_db.network_id, is_external)
         ext_dict, net = self._get_external_network_dict(context, port_db)
-        if not is_external:
+        if is_external and ext_dict:
             hosting_info['cidr_exposed'] = ext_dict['cidr_exposed']
             hosting_info['gateway_ip'] = ext_dict['gateway_ip']
             if ext_dict.get('interface_config'):
                 hosting_info['interface_config'] = ext_dict['interface_config']
-        else:
+            details = self.get_vrf_context(context,
+                                           port_db['device_id'], port_db)
             router_id = port_db.device_id
             router = self.l3_plugin.get_router(context, router_id)
             # skip routers not created by the user -- they will have
             # empty-string tenant IDs
             if router.get(ROUTER_ROLE_ATTR):
                 return
+            hosting_info['vrf_id'] = details['vrf_id']
             if ext_dict.get('global_config'):
                 hosting_info['global_config'] = (
                     ext_dict['global_config'])
@@ -274,7 +287,7 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
             ext_dict, net = self._get_external_network_dict(context, port_db)
             # If an OpFlex network is used on the external network,
             # the actual segment ID comes from the confgi file
-            if net.get('provider:network_type') == 'opflex':
+            if net and net.get('provider:network_type') == 'opflex':
                 if ext_dict.get('segmentation_id'):
                     return {'allocated_port_id': port_db.id,
                             'allocated_vlan': ext_dict['segmentation_id']}
@@ -294,7 +307,7 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
         # then don't allocate a port
 
         router = self.l3_plugin.get_router(context, router_id)
-        network_id = router.get('external_gateway_info', {}).get('network_id')
+        network_id = router.get(EXTERNAL_GW_INFO, {}).get('network_id')
         if network_id is None:
             return None
 

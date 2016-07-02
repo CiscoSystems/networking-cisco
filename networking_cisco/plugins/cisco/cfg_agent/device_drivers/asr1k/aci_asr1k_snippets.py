@@ -178,3 +178,10 @@ SET_GLOBAL_CONFIG = """
 REMOVE_GLOBAL_CONFIG = """
             <cmd>no %s</cmd>
 """
+
+# =============================================================================
+# VRF definition -- used only for checking existence in the
+# running config (note absence of <config> and <cli-config-data> elements).
+# Syntax: completely defined by parameter
+# =============================================================================
+VRF_CONFIG = """vrf definition %s"""
