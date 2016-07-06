@@ -12,6 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import hashlib
 import logging
 import netaddr
 
@@ -26,6 +27,8 @@ from networking_cisco.plugins.cisco.cfg_agent.device_drivers.asr1k import (
     asr1k_routing_driver as asr1k)
 from networking_cisco.plugins.cisco.cfg_agent.device_drivers.asr1k import (
     asr1k_snippets)
+from networking_cisco.plugins.cisco.cfg_agent.device_drivers.csr1kv import (
+    cisco_csr1kv_snippets as csr_snippets)
 from networking_cisco.plugins.cisco.cfg_agent.service_helpers import (
     routing_svc_helper as helper)
 from networking_cisco.plugins.cisco.common import cisco_constants
@@ -91,6 +94,34 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             g_configs = ext_gw_port['hosting_info'].get('global_config')
             if g_configs and isinstance(g_configs, list):
                 self._remove_global_config(ri, ext_gw_port, g_configs)
+            if ext_gw_port['hosting_info'].get('snat_subnets'):
+                self._set_snat_pools_from_hosting_info(ri, ext_gw_port, True)
+        else:
+            self._remove_secondary_ips(ri, ext_gw_port)
+
+    def _handle_external_gateway_added_global_router(self, ri, ext_gw_port):
+        super(AciASR1kRoutingDriver,
+              self)._handle_external_gateway_added_global_router(ri,
+                                                                 ext_gw_port)
+        self._add_secondary_ips(ri, ext_gw_port)
+
+    def _add_secondary_ips(self, ri, ext_gw_port):
+        subnets = ri.router['gw_port'].get('extra_subnets', [])
+        for subnet in subnets:
+            net = netaddr.IPNetwork(subnet['cidr'])
+            secondary_ip = netaddr.IPAddress(net.value +
+                                             (net.hostmask.value - 1))
+            self._asr_do_add_secondary_ip(secondary_ip,
+                                          ext_gw_port, net.netmask)
+
+    def _remove_secondary_ips(self, ri, ext_gw_port):
+        subnets = ri.router['gw_port'].get('extra_subnets', [])
+        for subnet in subnets:
+            net = netaddr.IPNetwork(subnet['cidr'])
+            secondary_ip = netaddr.IPAddress(net.value +
+                                             (net.hostmask.value - 1))
+            self._asr_do_remove_secondary_ip(secondary_ip,
+                                             ext_gw_port, net.netmask)
 
     def _create_sub_interface(self, ri, port, is_external=False, gw_ip=""):
         vlan = self._get_interface_vlan_from_hosting_port(port)
@@ -99,10 +130,10 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             LOG.info(_LI("Sub-interface already exists, skipping"))
             return
         vrf_name = self._get_vrf_name(ri)
-        hsrp_ip = self._get_interface_ip_from_hosting_port(port,
+        hsrp_ip = self._get_interface_ip_from_hosting_port(ri, port,
             is_external=is_external)
-        net_mask = self._get_interface_subnet_from_hosting_port(port,
-            is_external=is_external)
+        net_mask = self._get_interface_subnet_from_hosting_port(
+            ri, port, is_external=is_external)
         # If the router's gateway isn't set, then we can't get the
         # relevant information -- skip configuration
         if hsrp_ip is None or net_mask is None:
@@ -146,7 +177,7 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             priority = ri.router[ha.DETAILS][ha.PRIORITY]
         port_ha_info = port[ha.HA_INFO]
         group = port_ha_info['group']
-        ip = self._get_interface_ip_from_hosting_port(port,
+        ip = self._get_interface_ip_from_hosting_port(ri, port,
             is_external=is_external)
         if is_external:
             ha_ip = port_ha_info['ha_port']['fixed_ips'][0]['ip_address']
@@ -171,7 +202,8 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             out_itfc = self._get_interface_name_from_hosting_port(port)
             ip = netaddr.IPNetwork(cidr)
             subnet, mask = ip.network.format(), ip.netmask.format()
-            gateway_ip = self._get_interface_gateway_ip_from_hosting_port(port)
+            gateway_ip = self._get_interface_gateway_ip_from_hosting_port(
+                ri, port)
             # If the gateway isn't set, then we can't set the route
             if not gateway_ip:
                 return
@@ -186,13 +218,22 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             out_itfc = self._get_interface_name_from_hosting_port(port)
             ip = netaddr.IPNetwork(cidr)
             subnet, mask = ip.network.format(), ip.netmask.format()
-            gateway_ip = self._get_interface_gateway_ip_from_hosting_port(port)
+            gateway_ip = self._get_interface_gateway_ip_from_hosting_port(
+                ri, port)
             conf_str = snippets.REMOVE_TENANT_ROUTE_WITH_INTF % (
                 vrf_name, subnet, mask, out_itfc, gateway_ip)
             self._edit_running_config(conf_str,
                                       'REMOVE_TENANT_ROUTE_WITH_INTF')
 
-    def _get_interface_ip_from_hosting_port(self, port, is_external=False):
+    def _get_info_port(self, ri, port):
+        if ri.ex_gw_port:
+            return ri.ex_gw_port
+        elif ri.router.get('gw_port'):
+            return ri.router['gw_port']
+        else:
+            return port
+
+    def _get_interface_ip_from_hosting_port(self, ri, port, is_external=False):
         """
         Extract the underlying subinterface IP for a port
         e.g. 1.103.2.1
@@ -201,25 +242,28 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             return port['fixed_ips'][0]['ip_address']
         else:
             try:
-                cidr = port['hosting_info']['cidr_exposed']
+                info_port = self._get_info_port(ri, port)
+                cidr = info_port['hosting_info']['cidr_exposed']
                 return cidr.split("/")[0]
             except KeyError as e:
                 params = {'key': e}
                 raise cfg_exc.DriverExpectedKeyNotSetException(**params)
 
-    def _get_interface_gateway_ip_from_hosting_port(self, port):
+    def _get_interface_gateway_ip_from_hosting_port(self, ri, port):
         """
         Extract the next hop IP for a subinterface
         e.g. 1.103.2.254
         """
         try:
-            ip = port['hosting_info']['gateway_ip']
+            info_port = self._get_info_port(ri, port)
+            ip = info_port['hosting_info']['gateway_ip']
             return ip
         except KeyError as e:
             params = {'key': e}
             raise cfg_exc.DriverExpectedKeyNotSetException(**params)
 
-    def _get_interface_subnet_from_hosting_port(self, port, is_external=False):
+    def _get_interface_subnet_from_hosting_port(self, ri,
+                                                port, is_external=False):
         """
         Extract the CIDR information for the interposing subnet
         e.g. 1.103.2.0/24
@@ -228,7 +272,8 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             return netaddr.IPNetwork(port['ip_cidr']).netmask.format()
         else:
             try:
-                cidr_exposed = port['hosting_info']['cidr_exposed']
+                info_port = self._get_info_port(ri, port)
+                cidr_exposed = info_port['hosting_info']['cidr_exposed']
                 return netaddr.IPNetwork(cidr_exposed).netmask.format()
             except KeyError as e:
                 params = {'key': e}
@@ -248,24 +293,49 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
         cfg_syncer = syncer.ConfigSyncer(routers, self, hd)
         cfg_syncer.delete_invalid_cfg()
 
+    def _create_vrf(self, ri):
+        # just get the VRF -- creation is done
+        # by the service handler
+        self._get_vrf_name(ri)
+
+    def _do_create_vrf(self, vrf_name):
+        vrf_str = snippets.VRF_CONFIG % vrf_name
+        conf_str = csr_snippets.CREATE_VRF % vrf_name
+        if not self._cfg_exists(vrf_str):
+            self._edit_running_config(conf_str, 'CREATE_VRF')
+
     def _get_vrf_name(self, ri):
         """
-        For ACI, a tenant is mapped to a VRF.
+        For ACI, there are different mappings for VRFs. The
+        VRF is passed down as a parameter of the gateway port.
+        As a result, the VRF isn't available until the gateway
+        port on the router has been set, so defer setting it if
+        we don't have this parameter yet.
         """
-        router_id = (helper.N_ROUTER_PREFIX +
-                     ri.router['tenant_id'])[:self.DEV_NAME_LEN]
+        # Look at the router just passed to us first, and if
+        # that isn't there, look for the router we used to have
+        # (indicates that the gateway port is being cleared, but
+        # means that the infromation is still useful)
+        ext_gw_port = ri.router.get('gw_port') or ri.ex_gw_port
+        if not ext_gw_port:
+            return None
+        vrf_tag = ext_gw_port['hosting_info'].get('vrf_id')
+        # This could happen if it's the global router
+        if not vrf_tag:
+            return None
+        vrf_id = (helper.N_ROUTER_PREFIX + vrf_tag)[:self.DEV_NAME_LEN]
         is_multi_region_enabled = cfg.CONF.multi_region.enable_multi_region
 
         if is_multi_region_enabled:
             region_id = cfg.CONF.multi_region.region_id
-            vrf_name = "%s-%s" % (router_id, region_id)
+            vrf_name = "%s-%s" % (vrf_id, region_id)
         else:
-            vrf_name = router_id
+            vrf_name = vrf_id
         return vrf_name
 
     def _add_floating_ip(self, ri, ex_gw_port, floating_ip, fixed_ip):
         vrf_name = self._get_vrf_name(ri)
-        self._asr_do_add_floating_ip(ri, floating_ip, fixed_ip,
+        self._asr_do_add_floating_ip(floating_ip, fixed_ip,
                                      vrf_name, ex_gw_port)
 
         # We need to make sure that our external interface has an IP address
@@ -283,7 +353,7 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
 
     def _remove_floating_ip(self, ri, ext_gw_port, floating_ip, fixed_ip):
         vrf_name = self._get_vrf_name(ri)
-        self._asr_do_remove_floating_ip(ri, floating_ip,
+        self._asr_do_remove_floating_ip(floating_ip,
                                         fixed_ip,
                                         vrf_name,
                                         ext_gw_port)
@@ -337,7 +407,7 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
                        sub_interface, secondary_ip, netmask))
         self._edit_running_config(conf_str, 'REMOVE_SECONDARY_IP')
 
-    def _asr_do_add_floating_ip(self, ri, floating_ip,
+    def _asr_do_add_floating_ip(self, floating_ip,
                                 fixed_ip, vrf, ex_gw_port):
         """
         To implement a floating ip, an ip static nat is configured in the
@@ -361,7 +431,7 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
                 (fixed_ip, floating_ip, vrf))
         self._edit_running_config(confstr, 'SET_STATIC_SRC_TRL_NO_VRF_MATCH')
 
-    def _asr_do_remove_floating_ip(self, ri, floating_ip,
+    def _asr_do_remove_floating_ip(self, floating_ip,
                                    fixed_ip, vrf, ex_gw_port):
         if ex_gw_port.get(ha.HA_INFO):
             hsrp_grp = ex_gw_port[ha.HA_INFO]['group']
@@ -401,18 +471,19 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             pool_name = "%s_nat_pool" % (vrf_name)
             self._do_set_snat_pool(pool_name, subnet['ip'],
                                    subnet['ip'], str(net.netmask), is_delete)
-            secondary_ip = netaddr.IPAddress(net.value +
-                                             (net.hostmask.value - 1))
-            if is_delete:
-                self._asr_do_remove_secondary_ip(secondary_ip,
-                                                 gw_port, str(net.netmask))
-            else:
-                self._asr_do_add_secondary_ip(secondary_ip,
-                                              gw_port, str(net.netmask))
+            # TODO(tbachman): re-enable, once fixed
+            #secondary_ip = netaddr.IPAddress(net.value +
+            #                                 (net.hostmask.value - 1))
+            #if is_delete:
+            #    self._asr_do_remove_secondary_ip(secondary_ip,
+            #                                     gw_port, str(net.netmask))
+            #else:
+            #    self._asr_do_add_secondary_ip(secondary_ip,
+            #                                  gw_port, str(net.netmask))
 
     def _set_nat_pool(self, ri, gw_port, is_delete):
-        if gw_port['hosting_info'].get('snat_subnets'):
-            self._set_snat_pools_from_hosting_info(ri, gw_port, is_delete)
+        # NOOP -- set when external GW is set
+        pass
 
     def _handle_external_gateway_added_normal_router(self, ri, ext_gw_port):
         super(AciASR1kRoutingDriver,
@@ -424,6 +495,8 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
         g_configs = ext_gw_port['hosting_info'].get('global_config')
         if g_configs and isinstance(g_configs, list):
             self._set_global_config(ri, ext_gw_port, g_configs)
+        if ext_gw_port['hosting_info'].get('snat_subnets'):
+            self._set_snat_pools_from_hosting_info(ri, ext_gw_port, False)
 
     def _set_global_config(self, ri, port, g_configs):
         for g_config in g_configs:
@@ -463,9 +536,9 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
 
     def _set_vrf_pid(self, ri, port, config):
         # Convert a VRF to a process iD for a router instance
-        vrf = self._get_vrf_name(ri)
+        vrf = self._get_vrf_name(ri).strip('nrouter-')[:6]
         # strip to 4 characters to limit pid to 16-bit value
         # (limit on ASR)
         # TODO(tbachman): fix to ensure PID uniqueness
-        pid = int(vrf.strip('nrouter-')[:4], 16)
+        pid = int(hashlib.md5(vrf).hexdigest()[:4], 16)
         return str(pid)
