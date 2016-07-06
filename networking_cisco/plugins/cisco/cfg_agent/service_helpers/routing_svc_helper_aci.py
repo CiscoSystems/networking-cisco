@@ -12,6 +12,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import copy
+
 from oslo_log import log as logging
 
 from neutron.common import constants as l3_constants
@@ -30,6 +32,7 @@ class RoutingServiceHelperAci(helper.RoutingServiceHelper):
         super(RoutingServiceHelperAci, self).__init__(
             host, conf, cfg_agent)
         self._router_ids_by_vrf = {}
+        self._router_ids_by_vrf_and_ext_net = {}
 
     def _process_new_ports(self, ri, new_ports, ex_gw_port, list_port_ids_up):
         # Only add internal networks if we have an
@@ -53,6 +56,9 @@ class RoutingServiceHelperAci(helper.RoutingServiceHelper):
                 self._internal_network_removed(ri, p, gw_port)
             ri.internal_ports.remove(p)
 
+    def _enable_disable_ports(self, ri, ex_gw_port, internal_ports):
+        pass
+
     def _process_gateway_set(self, ri, ex_gw_port, list_port_ids_up):
         super(RoutingServiceHelperAci,
               self)._process_gateway_set(ri, ex_gw_port, list_port_ids_up)
@@ -61,20 +67,17 @@ class RoutingServiceHelperAci(helper.RoutingServiceHelper):
         new_ports = [p for p in interfaces
                      if (p['admin_state_up'] and
                          p not in ri.internal_ports)]
-        super(RoutingServiceHelperAci,
-              self)._process_new_ports(
-                  ri, new_ports, ex_gw_port, list_port_ids_up)
+        self._process_new_ports(ri, new_ports, ex_gw_port, list_port_ids_up)
 
     def _process_gateway_cleared(self, ri, ex_gw_port):
         super(RoutingServiceHelperAci,
               self)._process_gateway_cleared(ri, ex_gw_port)
+
         # remove the internal networks at this time,
         # while the gateway information is still available
         # (has VRF network parameters)
-        old_ports = [p for p in ri.internal_ports
-                     if p['admin_state_up']]
-        super(RoutingServiceHelperAci,
-              self)._process_old_ports(ri, old_ports, ex_gw_port)
+        del_ports = copy.copy(ri.internal_ports)
+        self._process_old_ports(ri, del_ports, ex_gw_port)
 
     def _add_rid_to_vrf_list(self, ri):
         """Add router ID to a VRF list.
@@ -121,3 +124,54 @@ class RoutingServiceHelperAci(helper.RoutingServiceHelper):
                     LOG.debug("++ REMOVING VRF %s" % vrf_name)
                     driver._remove_vrf(ri)
                     del self._router_ids_by_vrf[vrf_name]
+
+    def _internal_network_added(self, ri, port, ex_gw_port):
+        super(RoutingServiceHelperAci, self)._internal_network_added(
+            ri, port, ex_gw_port)
+        driver = self.driver_manager.get_driver(ri.id)
+        vrf_name = driver._get_vrf_name(ri)
+        net_name = ex_gw_port['hosting_info'].get('network_name')
+        self._router_ids_by_vrf_and_ext_net.setdefault(
+            vrf_name, {}).setdefault(net_name, set()).add(ri.router['id'])
+
+    def _internal_network_removed(self, ri, port, ex_gw_port):
+        """Remove an internal router port
+
+        Check to see if this is the last port to be removed for
+        a given network scoped by a VRF (note: there can be
+        different mappings between VRFs and networks -- 1-to-1,
+        1-to-n, n-to-1, n-to-n -- depending on the configuration
+        and workflow used). If it is the last port, set the flag
+        indicating that the internal sub-interface for that netowrk
+        on the ASR should be deleted
+        """
+        itfc_deleted = False
+        driver = self.driver_manager.get_driver(ri.id)
+        vrf_name = driver._get_vrf_name(ri)
+        network_name = ex_gw_port['hosting_info'].get('network_name')
+        if self._router_ids_by_vrf_and_ext_net.get(
+            vrf_name, {}).get(network_name) and (
+                ri.router['id'] in
+                self._router_ids_by_vrf_and_ext_net[vrf_name][network_name]):
+            # If this is the last port for this neutron router,
+            # then remove this router from the list
+            if len(ri.internal_ports) == 1 and port in ri.internal_ports:
+                self._router_ids_by_vrf_and_ext_net[
+                    vrf_name][network_name].remove(ri.router['id'])
+
+                # Check if any other routers in this VRF have this network,
+                # and if not, set the flag to remove the interface
+                if not self._router_ids_by_vrf_and_ext_net[vrf_name].get(
+                        network_name):
+                    LOG.debug("++ REMOVING NETWORK %s" % network_name)
+                    itfc_deleted = True
+                    del self._router_ids_by_vrf_and_ext_net[
+                        vrf_name][network_name]
+                    if not self._router_ids_by_vrf_and_ext_net.get(vrf_name):
+                        del self._router_ids_by_vrf_and_ext_net[vrf_name]
+
+        driver.internal_network_removed(ri, port,
+                                        itfc_deleted=itfc_deleted)
+        if ri.snat_enabled and ex_gw_port:
+            driver.disable_internal_network_NAT(ri, port, ex_gw_port,
+                                                itfc_deleted=itfc_deleted)

@@ -175,6 +175,7 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
         # TODO(tbachman): see if we can get rid of the default
         transit_net = self.transit_nets_cfg.get(
             external_network) or self._default_ext_dict
+        transit_net['network_name'] = external_network
         return transit_net, network
 
     @property
@@ -226,7 +227,7 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
             if snat_subnets and snat_ips:
                 hosting_info['snat_subnets'] = []
                 for subnet in snat_subnets:
-                    snat_subnet = {'id': subnet['id'],
+                    snat_subnet = {'id': router['tenant_id'],
                                    'ip': snat_ips['host_snat_ip'],
                                    'cidr': subnet['cidr']}
                     hosting_info['snat_subnets'].append(snat_subnet)
@@ -250,10 +251,9 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
             hosting_device['id'], port_db.network_id, is_external)
         ext_dict, net = self._get_external_network_dict(context, port_db)
         if is_external and ext_dict:
+            hosting_info['network_name'] = ext_dict['network_name']
             hosting_info['cidr_exposed'] = ext_dict['cidr_exposed']
             hosting_info['gateway_ip'] = ext_dict['gateway_ip']
-            if ext_dict.get('interface_config'):
-                hosting_info['interface_config'] = ext_dict['interface_config']
             details = self.get_vrf_context(context,
                                            port_db['device_id'], port_db)
             router_id = port_db.device_id
@@ -267,6 +267,9 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
                 hosting_info['global_config'] = (
                     ext_dict['global_config'])
             self._add_snat_info(context, router, net, hosting_info)
+        else:
+            if ext_dict.get('interface_config'):
+                hosting_info['interface_config'] = ext_dict['interface_config']
 
     def allocate_hosting_port(self, context, router_id, port_db, network_type,
                               hosting_device_id):

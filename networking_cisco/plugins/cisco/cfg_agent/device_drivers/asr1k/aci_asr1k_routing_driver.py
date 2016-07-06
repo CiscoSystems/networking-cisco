@@ -44,6 +44,7 @@ LOG = logging.getLogger(__name__)
 
 DEVICE_OWNER_ROUTER_GW = constants.DEVICE_OWNER_ROUTER_GW
 HA_INFO = 'ha_info'
+NAT_POOL_PREFIX = 'snat_id-'
 ROUTER_ROLE_ATTR = routerrole.ROUTER_ROLE_ATTR
 ROUTER_ROLE_HA_REDUNDANCY = cisco_constants.ROUTER_ROLE_HA_REDUNDANCY
 ROUTER_ROLE_GLOBAL = cisco_constants.ROUTER_ROLE_GLOBAL
@@ -59,8 +60,14 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
                                'device_id': device_params.get('device_id')}
         self._template_dict = {'vrf': self._set_vrf,
                                'vrf_pid': self._set_vrf_pid}
+        self._router_ids_by_snat_id = {}
+        # We need to limit the prefix to the overall DEV_NAME_LEN
+        self.NAT_POOL_ID_LEN = self.DEV_NAME_LEN - len(NAT_POOL_PREFIX)
 
     # ============== Public functions ==============
+    def router_added(self, ri):
+        # No-Op -- this is managed by the service handler
+        pass
 
     def internal_network_added(self, ri, port):
         if not self._is_port_v6(port):
@@ -83,13 +90,11 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
                 # so configure routes for the tenant networks
                 if_configs = port['hosting_info'].get('interface_config')
                 if if_configs and isinstance(if_configs, list):
-                    self._set_subinterface(ri, port, if_configs)
+                    self._add_interface_config(ri, port, if_configs)
                 else:
                     self._add_tenant_net_route(ri, port)
 
     def external_gateway_removed(self, ri, ext_gw_port):
-        super(AciASR1kRoutingDriver, self).external_gateway_removed(ri,
-            ext_gw_port)
         if not self._is_global_router(ri):
             g_configs = ext_gw_port['hosting_info'].get('global_config')
             if g_configs and isinstance(g_configs, list):
@@ -98,6 +103,8 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
                 self._set_snat_pools_from_hosting_info(ri, ext_gw_port, True)
         else:
             self._remove_secondary_ips(ri, ext_gw_port)
+        super(AciASR1kRoutingDriver, self).external_gateway_removed(ri,
+            ext_gw_port)
 
     def _handle_external_gateway_added_global_router(self, ri, ext_gw_port):
         super(AciASR1kRoutingDriver,
@@ -115,7 +122,7 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
                                           ext_gw_port, net.netmask)
 
     def _remove_secondary_ips(self, ri, ext_gw_port):
-        subnets = ri.router['gw_port'].get('extra_subnets', [])
+        subnets = ext_gw_port.get('extra_subnets', [])
         for subnet in subnets:
             net = netaddr.IPNetwork(subnet['cidr'])
             secondary_ip = netaddr.IPAddress(net.value +
@@ -152,14 +159,14 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
                           'port': port}
                 raise cfg_exc.HAParamsMissingException(**params)
 
-    def _set_subinterface(self, ri, port, if_configs):
+    def _add_interface_config(self, ri, port, if_configs):
         sub_interface = self._get_interface_name_from_hosting_port(port)
         for if_config in if_configs:
             conf_str = (snippets.SET_INTERFACE_CONFIG % (sub_interface,
                 (self._replace_template_vars(ri, port, if_config))))
             self._edit_running_config(conf_str, 'SET_INTERFACE_CONFIG')
 
-    def _remove_subinterface(self, ri, port, if_configs):
+    def _remove_interface_config(self, ri, port, if_configs):
         sub_interface = self._get_interface_name_from_hosting_port(port)
         for if_config in if_configs:
             conf_str = (snippets.REMOVE_INTERFACE_CONFIG % (sub_interface,
@@ -279,12 +286,14 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
                 params = {'key': e}
                 raise cfg_exc.DriverExpectedKeyNotSetException(**params)
 
-    def internal_network_removed(self, ri, port):
+    def internal_network_removed(self, ri, port, itfc_deleted=False):
         if_configs = port['hosting_info'].get('interface_config')
-        if if_configs and isinstance(if_configs, list):
-            self._remove_subinterface(ri, port, if_configs)
+        if if_configs and isinstance(if_configs, list) and itfc_deleted:
+            self._remove_interface_config(ri, port, if_configs)
         else:
             self._remove_tenant_net_route(ri, port)
+        if itfc_deleted:
+            self._remove_sub_interface(port)
 
     # ============== Internal "preparation" functions  ==============
 
@@ -465,21 +474,11 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
 
     def _set_snat_pools_from_hosting_info(self, ri, gw_port, is_delete):
         # TODO(tbachma ): unique naming for more than one pool
-        vrf_name = self._get_vrf_name(ri)
         for subnet in gw_port['hosting_info'].get('snat_subnets', []):
-            net = netaddr.IPNetwork(subnet['cidr'])
-            pool_name = "%s_nat_pool" % (vrf_name)
-            self._do_set_snat_pool(pool_name, subnet['ip'],
-                                   subnet['ip'], str(net.netmask), is_delete)
-            # TODO(tbachman): re-enable, once fixed
-            #secondary_ip = netaddr.IPAddress(net.value +
-            #                                 (net.hostmask.value - 1))
-            #if is_delete:
-            #    self._asr_do_remove_secondary_ip(secondary_ip,
-            #                                     gw_port, str(net.netmask))
-            #else:
-            #    self._asr_do_add_secondary_ip(secondary_ip,
-            #                                  gw_port, str(net.netmask))
+            if is_delete:
+                self._remove_rid_from_snat_list(ri, gw_port, subnet)
+            else:
+                self._add_rid_to_snat_list(ri, gw_port, subnet)
 
     def _set_nat_pool(self, ri, gw_port, is_delete):
         # NOOP -- set when external GW is set
@@ -542,3 +541,37 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
         # TODO(tbachman): fix to ensure PID uniqueness
         pid = int(hashlib.md5(vrf).hexdigest()[:4], 16)
         return str(pid)
+
+    def _get_snat_pool_name(self, subnet):
+        snat_prefix = NAT_POOL_PREFIX + subnet['id'][:self.NAT_POOL_ID_LEN]
+        if cfg.CONF.multi_region.enable_multi_region:
+            snat_id = "%s-%s_nat_pool" % (snat_prefix,
+                cfg.CONF.multi_region.region_id)
+        else:
+            snat_id = "%s_nat_pool" % (snat_prefix)
+        return snat_id
+
+    def _add_rid_to_snat_list(self, ri, ext_gw_port, subnet):
+        net = netaddr.IPNetwork(subnet['cidr'])
+        snat_id = self._get_snat_pool_name(subnet)
+        if not self._router_ids_by_snat_id.get(snat_id):
+            LOG.debug("++ CREATING SNAT POOL %s" % snat_id)
+            self._do_set_snat_pool(snat_id, subnet['ip'],
+                                   subnet['ip'], str(net.netmask), False)
+        self._router_ids_by_snat_id.setdefault(snat_id, set()).add(
+            ri.router['id'])
+
+    def _remove_rid_from_snat_list(self, ri, ext_gw_port, subnet):
+        net = netaddr.IPNetwork(subnet['cidr'])
+        snat_id = self._get_snat_pool_name(subnet)
+        if self._router_ids_by_snat_id.get(snat_id) and (
+                ri.router['id'] in self._router_ids_by_snat_id[snat_id]):
+            self._router_ids_by_snat_id[snat_id].remove(ri.router['id'])
+            # If this is the last router for this SNAT ID, then we can
+            # safely delete the nat pool from the router config
+            # (handled by the driver)
+            if not self._router_ids_by_snat_id.get(snat_id):
+                LOG.debug("++ REMOVING SNAT POOL %s" % snat_id)
+                self._do_set_snat_pool(snat_id, subnet['ip'],
+                                       subnet['ip'], str(net.netmask), True)
+                del self._router_ids_by_snat_id[snat_id]

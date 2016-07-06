@@ -35,7 +35,7 @@ SET_TENANT_ROUTE_WITH_INTF = """
 REMOVE_TENANT_ROUTE_WITH_INTF = """
 <config>
         <cli-config-data>
-            <cmd>ip route vrf %s %s %s %s %s</cmd>
+            <cmd>no ip route vrf %s %s %s %s %s</cmd>
         </cli-config-data>
 </config>
 """
