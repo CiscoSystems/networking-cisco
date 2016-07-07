@@ -61,6 +61,7 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
         self._template_dict = {'vrf': self._set_vrf,
                                'vrf_pid': self._set_vrf_pid}
         self._router_ids_by_snat_id = {}
+        self._subnets_by_ext_net = {}
         # We need to limit the prefix to the overall DEV_NAME_LEN
         self.NAT_POOL_ID_LEN = self.DEV_NAME_LEN - len(NAT_POOL_PREFIX)
 
@@ -101,6 +102,7 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
                 self._remove_global_config(ri, ext_gw_port, g_configs)
             if ext_gw_port['hosting_info'].get('snat_subnets'):
                 self._set_snat_pools_from_hosting_info(ri, ext_gw_port, True)
+            self._set_subnets_for_ext_net(ri, ext_gw_port)
         else:
             self._remove_secondary_ips(ri, ext_gw_port)
         super(AciASR1kRoutingDriver, self).external_gateway_removed(ri,
@@ -113,7 +115,10 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
         self._add_secondary_ips(ri, ext_gw_port)
 
     def _add_secondary_ips(self, ri, ext_gw_port):
-        subnets = ri.router['gw_port'].get('extra_subnets', [])
+        net_name = ext_gw_port.get('hosting_info', {}).get('network_name')
+        if not net_name:
+            return
+        subnets = self._subnets_by_ext_net.get(net_name, [])
         for subnet in subnets:
             net = netaddr.IPNetwork(subnet['cidr'])
             secondary_ip = netaddr.IPAddress(net.value +
@@ -122,7 +127,10 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
                                           ext_gw_port, net.netmask)
 
     def _remove_secondary_ips(self, ri, ext_gw_port):
-        subnets = ext_gw_port.get('extra_subnets', [])
+        net_name = ext_gw_port.get('hosting_info', {}).get('network_name')
+        if not net_name:
+            return
+        subnets = self._subnets_by_ext_net.get(net_name, [])
         for subnet in subnets:
             net = netaddr.IPNetwork(subnet['cidr'])
             secondary_ip = netaddr.IPAddress(net.value +
@@ -496,6 +504,7 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
             self._set_global_config(ri, ext_gw_port, g_configs)
         if ext_gw_port['hosting_info'].get('snat_subnets'):
             self._set_snat_pools_from_hosting_info(ri, ext_gw_port, False)
+        self._set_subnets_for_ext_net(ri, ext_gw_port)
 
     def _set_global_config(self, ri, port, g_configs):
         for g_config in g_configs:
@@ -575,3 +584,35 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
                 self._do_set_snat_pool(snat_id, subnet['ip'],
                                        subnet['ip'], str(net.netmask), True)
                 del self._router_ids_by_snat_id[snat_id]
+
+    def _make_subnet_dict(self, snat):
+        # Set the GW IP, assuming it's .1
+        net = netaddr.IPNetwork(snat['cidr'])
+        gateway_ip = str(netaddr.IPAddress(net.value + 1))
+        return {"ipv6_ra_mode": None,
+                "cidr": snat['cidr'],
+                "gateway_ip": gateway_ip,
+                "id": snat['id']}
+
+    def _set_subnets_for_ext_net(self, ri, ext_gw_port):
+        """Collect subnets for a given external network.
+
+        This handles both setting and clearing of the
+        subnets configured on an external network. It includes
+        the SNAT subnets. All routers conecting to a given
+        external network should have the same state for subnets,
+        so setting and clearing should be achieved through
+        using the state from any router connected to that network.
+        """
+        net_name = ext_gw_port['hosting_info']['network_name']
+        self._subnets_by_ext_net[net_name] = []
+        if ri.ex_gw_port and not ri.router.get('gw_port'):
+            return
+        if ext_gw_port['extra_subnets']:
+            self._subnets_by_ext_net[net_name] = ext_gw_port['extra_subnets']
+        for snat in ext_gw_port['hosting_info'].get('snat_subnets', []):
+            subnet = self._make_subnet_dict(snat)
+            if subnet['cidr'] == ext_gw_port['subnets'][0]['cidr']:
+                continue
+            if subnet not in self._subnets_by_ext_net[net_name]:
+                self._subnets_by_ext_net[net_name].append(subnet)

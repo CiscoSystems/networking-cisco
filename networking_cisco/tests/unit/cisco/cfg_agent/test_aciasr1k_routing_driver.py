@@ -108,6 +108,7 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
                         'fixed_ips': [{'ip_address': self.gw_ip}],
                         'subnets': [{'cidr': self.gw_ip_cidr,
                                      'gateway_ip': self.gw_ip}],
+                        'extra_subnets': [],
                         'hosting_info': {
                             'vrf_id': self.vrf_uuid,
                             'physical_interface': self.phy_infc,
@@ -121,6 +122,8 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         self.TEST_CIDR = '20.0.0.0/24'
         self.TEST_SNAT_IP = '20.0.0.2'
         self.TEST_SNAT_ID = _uuid()
+        self.TEST_NET = 'testnet1'
+        self.ex_gw_port['hosting_info']['network_name'] = self.TEST_NET
         self.ex_gw_port['hosting_info']['vrf_id'] = self.vrf_uuid
         self.ex_gw_port['hosting_info']['gateway_ip'] = self.transit_gw_ip
         self.ex_gw_port['hosting_info']['cidr_exposed'] = self.transit_cidr
@@ -129,8 +132,10 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
              'ip': self.TEST_SNAT_IP,
              'cidr': self.TEST_CIDR}
         ]
+        self.ex_gw_port['ip_cidr'] = self.gw_ip_cidr
         self.ex_gw_port['gateway_ip'] = self.transit_gw_ip
         self.ex_gw_port['cidr_exposed'] = self.transit_cidr
+        self.ex_gw_port['extra_subnets'] = []
         self.ex_gw_port['hosting_info']['global_config'] = [
             [self.GLOBAL_CFG_STRING_1, self.GLOBAL_CFG_STRING_2]]
         net = netaddr.IPNetwork(self.TEST_CIDR)
@@ -414,6 +419,10 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         cfg_params_nat = (self.TEST_SNAT_POOL_ID, self.TEST_CIDR_SNAT_IP,
                           self.TEST_CIDR_SNAT_IP, net.netmask)
         self.assert_edit_run_cfg(asr_snippets.CREATE_NAT_POOL, cfg_params_nat)
+        net_name = self.ex_gw_port['hosting_info']['network_name']
+        self.assertEqual(self.driver._subnets_by_ext_net[net_name][0]['cidr'],
+                         self.TEST_CIDR)
+
         del(self.ex_gw_port['extra_subnets'])
 
     def test_external_gateway_removed_user_visible_router_nat_pool(self):
@@ -590,3 +599,35 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         cfg_params_nat = (self.TEST_SNAT_POOL_ID, self.TEST_CIDR_SNAT_IP,
                           self.TEST_CIDR_SNAT_IP, self.ex_gw_ip_mask)
         self.assert_edit_run_cfg(asr_snippets.CREATE_NAT_POOL, cfg_params_nat)
+
+    def test_external_network_added_with_global_router(self):
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
+        self.driver.external_gateway_added(self.ri, self.ex_gw_port)
+
+        self.driver.external_gateway_added(self.ri, self.ex_gw_port)
+        self.assertTrue(len(self.driver._subnets_by_ext_net) == 1)
+        self.driver.external_gateway_added(self.ri_global, self.ex_gw_port)
+        sub_interface = self.phy_infc + '.' + str(self.vlan_ext)
+        cfg_params_secondary = (sub_interface, self.TEST_CIDR_SECONDARY_IP,
+                                "255.255.255.0")
+        self.assert_edit_run_cfg(snippets.ADD_SECONDARY_IP,
+                                 cfg_params_secondary)
+
+    def test_external_network_removed_with_global_router(self):
+        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
+        self.driver.external_gateway_added(self.ri, self.ex_gw_port)
+        self.driver._interface_exists = mock.Mock(return_value=True)
+
+        self.driver.external_gateway_added(self.ri, self.ex_gw_port)
+        self.assertTrue(len(self.driver._subnets_by_ext_net) == 1)
+        self.driver.external_gateway_added(self.ri_global, self.ex_gw_port)
+        sub_interface = self.phy_infc + '.' + str(self.vlan_ext)
+        cfg_params_secondary = (sub_interface, self.TEST_CIDR_SECONDARY_IP,
+                                "255.255.255.0")
+        self.assert_edit_run_cfg(snippets.ADD_SECONDARY_IP,
+                                 cfg_params_secondary)
+        self.driver.external_gateway_removed(self.ri_global, self.ex_gw_port)
+        self.assert_edit_run_cfg(snippets.REMOVE_SECONDARY_IP,
+                                 cfg_params_secondary)
+        self.assert_edit_run_cfg(
+            csr_snippets.REMOVE_SUBINTERFACE, sub_interface)
