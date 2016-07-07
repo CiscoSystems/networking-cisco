@@ -62,6 +62,7 @@ class FakePortDb(object):
         self.device_id = device_id
         self.device_owner = device_owner
         self.hosting_info = {}
+        self.extra_subnets = []
 
     def get(self, name):
         return self[name]
@@ -75,6 +76,8 @@ class FakePortDb(object):
             return self.device_owner
         if key == 'device_id':
             return self.device_id
+        if key == 'extra_subnets':
+            return self.extra_subnets
         if key == 'hosting_info':
             return self.hosting_info
 
@@ -410,7 +413,7 @@ class TestAciVLANTrunkingPlugDriverGbp(
             net = network['network']
             subnet = self._create_subnet_with_name(net['id'],
                                                    '10.0.0.0/24',
-                                                   aci_vlan.APIC_SNAT)
+                                                   aci_vlan.APIC_SNAT_SUBNET)
             sn1 = subnet['subnet']
             ext_net_id = sn1['network_id']
             self._set_net_external(ext_net_id)
@@ -758,6 +761,46 @@ class TestAciVLANTrunkingPlugDriverNeutron(TestAciVLANTrunkingPlugDriverGbp):
             self.assertEqual(vrf_id, router['tenant_id'])
         else:
             self.assertEqual(vrf_id, router['id'])
+
+    def test_extend_hosting_port_info_adds_snat_subnets(self):
+        TEST_NET_NAME = 'Datacenter-Out'
+        FAKE_IP = '1.1.1.2'
+        FAKE_GW = '1.1.1.1'
+        self.plugging_driver.apic_driver.get_snat_ip_for_vrf = mock.Mock(
+            return_value={'external_segment_name': TEST_NET_NAME,
+                'host_snat_ip': FAKE_IP,
+                'gateway_ip': FAKE_GW,
+                'prefixlen': 24})
+        with self.network(name=self._gen_ext_net_name(
+                TEST_NET_NAME)) as network:
+            ext_net = network['network']
+            ext_net_id = ext_net['id']
+            self._set_net_external(ext_net_id)
+            with self.network(name=(aci_vlan.APIC_SNAT_NET + '-' +
+                                    ext_net_id)) as snat_net:
+                net = snat_net['network']
+                subnet = self._create_subnet_with_name(
+                    net['id'], '10.0.0.0/24', aci_vlan.APIC_SNAT_SUBNET)
+                sn1 = subnet['subnet']
+                gw_info = {'network_id': ext_net_id}
+                with self.router(external_gateway_info=gw_info,
+                                 tenant_id=sn1['tenant_id']) as router1:
+                    r1 = router1['router']
+                    hosting_info = {}
+                    fake_port_db_obj = FakePortDb('fakeuuid', ext_net_id,
+                        l3_constants.DEVICE_OWNER_ROUTER_GW, r1['id'])
+                    fake_port_db_obj.hosting_info['segmentation_id'] = 40
+                    hosting_device = {'id':
+                                      '00000000-0000-0000-0000-000000000002'}
+                    tenant_id = 'tenant_uuid1'
+                    ctx = context.Context('', tenant_id, is_admin=True)
+                    self._set_apic_driver_mocks(r1)
+                    self.plugging_driver.extend_hosting_port_info(ctx,
+                        fake_port_db_obj, hosting_device, hosting_info)
+                    self.assertEqual(hosting_info['snat_subnets'],
+                                     [{'id': r1['tenant_id'],
+                                       'ip': FAKE_IP,
+                                       'cidr': sn1['cidr']}])
 
     def test_extend_hosting_port_adds_segmentation_id_external_1_vrf(self):
         self.plugging_driver.apic_driver.per_tenant_context = False

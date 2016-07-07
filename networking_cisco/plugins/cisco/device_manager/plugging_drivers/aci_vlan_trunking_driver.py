@@ -31,7 +31,8 @@ LOG = logging.getLogger(__name__)
 
 
 APIC_OWNED = 'apic_owned_'
-APIC_SNAT = 'host-snat-pool-for-internal-use'
+APIC_SNAT_SUBNET = 'host-snat-pool-for-internal-use'
+APIC_SNAT_NET = 'host-snat-network-for-internal-use'
 EXTERNAL_GW_INFO = l3.EXTERNAL_GW_INFO
 UUID_REGEX = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 DEVICE_OWNER_ROUTER_GW = l3_constants.DEVICE_OWNER_ROUTER_GW
@@ -218,15 +219,44 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
                                 "no APIC ML2 driver could be found."))
         return self._apic_driver
 
+    def _snat_subnet_for_ext_net(self, context, subnet, net):
+        """Determine if an SNAT subnet is for this external network.
+
+        This method determines if a given SNAT subnet is intended for
+        the passed external network.
+
+        For APIC ML2/Neutron workflow, SNAT subnets are created on
+        a separate network from the external network. The association
+        with an external network is made by putting the name of the
+        external network in the name of the SNAT network name, using
+        a well-known prefix.
+        """
+        if subnet['network_id'] == net['id']:
+            return True
+
+        network = self._core_plugin.get_network(
+            context.elevated(), subnet['network_id'])
+        ext_net_name = network['name']
+        if (APIC_SNAT_NET + '-') in ext_net_name:
+            # This is APIC ML2 mode -- we need to strip the prefix
+            ext_net_name = ext_net_name.strip(APIC_SNAT_NET + '-')
+            if net['id'] == ext_net_name:
+                return True
+        return False
+
     def _add_snat_info(self, context, router, net, hosting_info):
         if net:
             snat_ips = self.apic_driver.get_snat_ip_for_vrf(context,
                 router['tenant_id'], net)
             snat_subnets = self._core_plugin.get_subnets(
-                context.elevated(), {'name': [APIC_SNAT]})
+                context.elevated(), {'name': [APIC_SNAT_SUBNET]})
             if snat_subnets and snat_ips:
                 hosting_info['snat_subnets'] = []
                 for subnet in snat_subnets:
+                    # Skip any SNAT subnets that aren't on this external
+                    # network
+                    if not self._snat_subnet_for_ext_net(context, subnet, net):
+                        continue
                     snat_subnet = {'id': router['tenant_id'],
                                    'ip': snat_ips['host_snat_ip'],
                                    'cidr': subnet['cidr']}
