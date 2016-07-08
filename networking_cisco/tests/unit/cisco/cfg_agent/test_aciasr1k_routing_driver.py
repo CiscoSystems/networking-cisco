@@ -134,6 +134,8 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         self.ex_gw_port['hosting_info']['global_config'] = [
             [self.GLOBAL_CFG_STRING_1, self.GLOBAL_CFG_STRING_2]]
         net = netaddr.IPNetwork(self.TEST_CIDR)
+        self.TEST_SNAT_POOL_ID = (driver.NAT_POOL_PREFIX +
+            self.TEST_SNAT_ID[:self.driver.NAT_POOL_ID_LEN] + '_nat_pool')
         self.TEST_CIDR_SNAT_IP = str(netaddr.IPAddress(net.first + 2))
         self.TEST_CIDR_SECONDARY_IP = str(netaddr.IPAddress(net.last - 1))
 
@@ -248,7 +250,7 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         self.driver.external_gateway_added(self.ri, self.ex_gw_port)
         sub_interface = self.phy_infc + '.' + str(self.vlan_ext)
         self.assert_edit_run_cfg(csr_snippets.ENABLE_INTF, sub_interface)
-        cfg_params_nat = (self.vrf + '_nat_pool', self.TEST_CIDR_SNAT_IP,
+        cfg_params_nat = (self.TEST_SNAT_POOL_ID, self.TEST_CIDR_SNAT_IP,
                           self.TEST_CIDR_SNAT_IP, self.ex_gw_ip_mask)
         self.assert_edit_run_cfg(asr_snippets.CREATE_NAT_POOL, cfg_params_nat)
 
@@ -294,30 +296,39 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
             self).test_driver_enable_internal_network_NAT_with_multi_region()
         self.port = self.int_port
 
-    def test_driver_disable_internal_network_NAT_with_multi_region(self):
-        self.port = self.gw_port
-        super(ASR1kRoutingDriverAci,
-            self).test_driver_disable_internal_network_NAT_with_multi_region()
-        self.port = self.int_port
-
     def test_driver_disable_internal_network_NAT(self):
         self.port = self.gw_port
         super(ASR1kRoutingDriverAci,
             self).test_driver_disable_internal_network_NAT()
         self.port = self.int_port
 
+    def test_driver_disable_internal_network_NAT_with_multi_region(self):
+        self.port = self.gw_port
+        super(ASR1kRoutingDriverAci,
+            self).test_driver_disable_internal_network_NAT_with_multi_region()
+        self.port = self.int_port
+
     def test_internal_network_removed(self):
         self.port = self.int_port
         self.driver._do_remove_sub_interface = mock.MagicMock()
-        self.driver.internal_network_removed(self.ri, self.port)
+        self.driver.internal_network_removed(self.ri,
+                                             self.port, itfc_deleted=False)
         self.assertFalse(self.driver._do_remove_sub_interface.called)
+
+    def test_internal_network_removed_remove_interface(self):
+        self.port = self.int_port
+        self.driver._do_remove_sub_interface = mock.MagicMock()
+        self.driver.internal_network_removed(self.ri,
+                                             self.port, itfc_deleted=True)
+        self.assertTrue(self.driver._do_remove_sub_interface.called)
 
     def test_internal_network_removed_with_interface_config(self):
         #self.ri.router['gw_port'] = self.int_port_w_config
         self.port = self.int_port_w_config
         self.driver._do_remove_sub_interface = mock.MagicMock()
-        self.driver.internal_network_removed(self.ri, self.port)
-        self.assertFalse(self.driver._do_remove_sub_interface.called)
+        self.driver.internal_network_removed(self.ri,
+                                             self.port, itfc_deleted=True)
+        self.assertTrue(self.driver._do_remove_sub_interface.called)
 
         sub_interface = self.phy_infc + '.' + str(self.transit_vlan)
         cfg_args_route = (sub_interface, 'testroute1')
@@ -400,7 +411,7 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         self.assert_edit_run_cfg(csr_snippets.ENABLE_INTF, sub_interface)
 
         net = netaddr.IPNetwork(self.TEST_CIDR)
-        cfg_params_nat = (self.vrf + '_nat_pool', self.TEST_CIDR_SNAT_IP,
+        cfg_params_nat = (self.TEST_SNAT_POOL_ID, self.TEST_CIDR_SNAT_IP,
                           self.TEST_CIDR_SNAT_IP, net.netmask)
         self.assert_edit_run_cfg(asr_snippets.CREATE_NAT_POOL, cfg_params_nat)
         del(self.ex_gw_port['extra_subnets'])
@@ -409,10 +420,14 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self.ex_gw_port['extra_subnets'] = [{'cidr': self.TEST_CIDR,
                                              'id': self.TEST_SNAT_ID}]
+        # Pre-populate the SNAT pool list
+        self.driver._add_rid_to_snat_list(
+            self.ri, self.ex_gw_port,
+            self.ex_gw_port['hosting_info']['snat_subnets'][0])
         self.driver.external_gateway_removed(self.ri, self.ex_gw_port)
 
         net = netaddr.IPNetwork(self.TEST_CIDR)
-        cfg_params_nat = (self.vrf + '_nat_pool', self.TEST_CIDR_SNAT_IP,
+        cfg_params_nat = (self.TEST_SNAT_POOL_ID, self.TEST_CIDR_SNAT_IP,
                           self.TEST_CIDR_SNAT_IP, net.netmask)
         self.assert_edit_run_cfg(asr_snippets.DELETE_NAT_POOL, cfg_params_nat)
 
@@ -426,9 +441,13 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
     def test_external_gateway_removed_non_ha(self):
         cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self._make_test_router_non_ha()
+        # Pre-populate the SNAT pool list
+        self.driver._add_rid_to_snat_list(
+            self.ri, self.ex_gw_port,
+            self.ex_gw_port['hosting_info']['snat_subnets'][0])
         self.driver.external_gateway_removed(self.ri, self.ex_gw_port)
 
-        cfg_params_nat = (self.vrf + '_nat_pool', self.TEST_CIDR_SNAT_IP,
+        cfg_params_nat = (self.TEST_SNAT_POOL_ID, self.TEST_CIDR_SNAT_IP,
                           self.TEST_CIDR_SNAT_IP, self.ex_gw_ip_mask)
         self.assert_edit_run_cfg(asr_snippets.DELETE_NAT_POOL, cfg_params_nat)
 
@@ -440,9 +459,13 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
 
     def test_external_gateway_removed(self):
         cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
+        # Pre-populate the SNAT pool list
+        self.driver._add_rid_to_snat_list(
+            self.ri, self.ex_gw_port,
+            self.ex_gw_port['hosting_info']['snat_subnets'][0])
         self.driver.external_gateway_removed(self.ri, self.ex_gw_port)
 
-        cfg_params_nat = (self.vrf + '_nat_pool', self.TEST_CIDR_SNAT_IP,
+        cfg_params_nat = (self.TEST_SNAT_POOL_ID, self.TEST_CIDR_SNAT_IP,
                           self.TEST_CIDR_SNAT_IP, self.ex_gw_ip_mask)
         self.assert_edit_run_cfg(asr_snippets.DELETE_NAT_POOL, cfg_params_nat)
 
@@ -458,10 +481,17 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         self.assertEqual(True, is_multi_region_enabled)
         region_id = cfg.CONF.multi_region.region_id
         vrf = self.vrf + "-" + region_id
+        # Pre-populate the SNAT pool list
+        self.driver._add_rid_to_snat_list(
+            self.ri, self.ex_gw_port,
+            self.ex_gw_port['hosting_info']['snat_subnets'][0])
 
         self.driver.external_gateway_removed(self.ri, self.ex_gw_port)
 
-        cfg_params_nat = (vrf + '_nat_pool', self.TEST_CIDR_SNAT_IP,
+        TEST_SNAT_MR_POOL_ID = (driver.NAT_POOL_PREFIX +
+            self.TEST_SNAT_ID[:self.driver.NAT_POOL_ID_LEN] + '-' +
+            region_id + '_nat_pool')
+        cfg_params_nat = (TEST_SNAT_MR_POOL_ID, self.TEST_CIDR_SNAT_IP,
                           self.TEST_CIDR_SNAT_IP, self.ex_gw_ip_mask)
         self.assert_edit_run_cfg(asr_snippets.DELETE_NAT_POOL, cfg_params_nat)
 
@@ -479,7 +509,7 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
 
         sub_interface = self.phy_infc + '.' + str(self.vlan_ext)
         self.assert_edit_run_cfg(csr_snippets.ENABLE_INTF, sub_interface)
-        cfg_params_nat = (self.vrf + '_nat_pool', self.TEST_CIDR_SNAT_IP,
+        cfg_params_nat = (self.TEST_SNAT_POOL_ID, self.TEST_CIDR_SNAT_IP,
                           self.TEST_CIDR_SNAT_IP, self.ex_gw_ip_mask)
         self.assert_edit_run_cfg(asr_snippets.CREATE_NAT_POOL, cfg_params_nat)
 
@@ -490,16 +520,20 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         sub_interface = self.phy_infc + '.' + str(self.vlan_ext)
         self.assert_edit_run_cfg(csr_snippets.ENABLE_INTF, sub_interface)
 
-        cfg_params_nat = (self.vrf + '_nat_pool', self.TEST_CIDR_SNAT_IP,
+        cfg_params_nat = (self.TEST_SNAT_POOL_ID, self.TEST_CIDR_SNAT_IP,
                           self.TEST_CIDR_SNAT_IP, self.ex_gw_ip_mask)
         self.assert_edit_run_cfg(asr_snippets.CREATE_NAT_POOL, cfg_params_nat)
 
     def test_external_gateway_removed_redundancy_router(self):
         cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
         self._make_test_router_redundancy_router()
+        # Pre-populate the SNAT pool list
+        self.driver._add_rid_to_snat_list(
+            self.ri, self.ex_gw_port,
+            self.ex_gw_port['hosting_info']['snat_subnets'][0])
         self.driver.external_gateway_removed(self.ri, self.ex_gw_port)
 
-        cfg_params_nat = (self.vrf + '_nat_pool', self.TEST_CIDR_SNAT_IP,
+        cfg_params_nat = (self.TEST_SNAT_POOL_ID, self.TEST_CIDR_SNAT_IP,
                           self.TEST_CIDR_SNAT_IP, self.ex_gw_ip_mask)
         self.assert_edit_run_cfg(asr_snippets.DELETE_NAT_POOL, cfg_params_nat)
 
@@ -514,26 +548,28 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         is_multi_region_enabled = cfg.CONF.multi_region.enable_multi_region
         self.assertEqual(True, is_multi_region_enabled)
         region_id = cfg.CONF.multi_region.region_id
-        vrf = self.vrf + "-" + region_id
         self.driver.external_gateway_added(self.ri, self.ex_gw_port)
 
         sub_interface = self.phy_infc + '.' + str(self.vlan_ext)
         self.assert_edit_run_cfg(csr_snippets.ENABLE_INTF, sub_interface)
 
-        cfg_params_nat = (vrf + '_nat_pool', self.TEST_CIDR_SNAT_IP,
-                          self.TEST_CIDR_SNAT_IP, self.ex_gw_ip_mask)
-        self.assert_edit_run_cfg(asr_snippets.CREATE_NAT_POOL, cfg_params_nat)
-        cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
-        cfg_params_nat = (vrf + '_nat_pool', self.TEST_CIDR_SNAT_IP,
+        TEST_SNAT_MR_POOL_ID = (driver.NAT_POOL_PREFIX +
+            self.TEST_SNAT_ID[:self.driver.NAT_POOL_ID_LEN] + '-' +
+            region_id + '_nat_pool')
+        cfg_params_nat = (TEST_SNAT_MR_POOL_ID, self.TEST_CIDR_SNAT_IP,
                           self.TEST_CIDR_SNAT_IP, self.ex_gw_ip_mask)
         self.assert_edit_run_cfg(asr_snippets.CREATE_NAT_POOL, cfg_params_nat)
         cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
 
     def test_external_gateway_removed_user_visible_router(self):
         cfg.CONF.set_override('enable_multi_region', False, 'multi_region')
+        # Pre-populate the SNAT pool list
+        self.driver._add_rid_to_snat_list(
+            self.ri, self.ex_gw_port,
+            self.ex_gw_port['hosting_info']['snat_subnets'][0])
         self.driver.external_gateway_removed(self.ri, self.ex_gw_port)
 
-        cfg_params_nat = (self.vrf + '_nat_pool', self.TEST_CIDR_SNAT_IP,
+        cfg_params_nat = (self.TEST_SNAT_POOL_ID, self.TEST_CIDR_SNAT_IP,
                           self.TEST_CIDR_SNAT_IP, self.ex_gw_ip_mask)
         self.assert_edit_run_cfg(asr_snippets.DELETE_NAT_POOL, cfg_params_nat)
 
@@ -551,6 +587,6 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         sub_interface = self.phy_infc + '.' + str(self.vlan_ext)
         self.assert_edit_run_cfg(csr_snippets.ENABLE_INTF, sub_interface)
 
-        cfg_params_nat = (self.vrf + '_nat_pool', self.TEST_CIDR_SNAT_IP,
+        cfg_params_nat = (self.TEST_SNAT_POOL_ID, self.TEST_CIDR_SNAT_IP,
                           self.TEST_CIDR_SNAT_IP, self.ex_gw_ip_mask)
         self.assert_edit_run_cfg(asr_snippets.CREATE_NAT_POOL, cfg_params_nat)

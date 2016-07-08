@@ -429,7 +429,7 @@ class TestAciVLANTrunkingPlugDriverGbp(
                 self.plugging_driver.extend_hosting_port_info(ctx,
                     fake_port_db_obj, hosting_device, hosting_info)
                 self.assertEqual(hosting_info['snat_subnets'],
-                                 [{'id': sn1['id'],
+                                 [{'id': r1['tenant_id'],
                                    'ip': FAKE_IP,
                                    'cidr': sn1['cidr']}])
 
@@ -453,7 +453,7 @@ class TestAciVLANTrunkingPlugDriverGbp(
                     hosting_info = {}
                     fake_port_db_obj = FakePortDb('fakeuuid',
                         sn1['network_id'],
-                        l3_constants.DEVICE_OWNER_ROUTER_GW,
+                        l3_constants.DEVICE_OWNER_ROUTER_INTF,
                         r1['id'])
                     hosting_device = {'id':
                                       '00000000-0000-0000-0000-000000000002'}
