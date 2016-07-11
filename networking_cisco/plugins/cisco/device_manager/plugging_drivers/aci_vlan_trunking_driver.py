@@ -239,7 +239,7 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
         ext_net_name = network['name']
         if (APIC_SNAT_NET + '-') in ext_net_name:
             # This is APIC ML2 mode -- we need to strip the prefix
-            ext_net_name = ext_net_name.strip(APIC_SNAT_NET + '-')
+            ext_net_name = ext_net_name[len(APIC_SNAT_NET + '-'):]
             if net['id'] == ext_net_name:
                 return True
         return False
