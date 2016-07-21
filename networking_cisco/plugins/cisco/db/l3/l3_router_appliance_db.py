@@ -582,10 +582,10 @@ class L3RouterApplianceDBMixin(extraroute_db.ExtraRoute_dbonly_mixin):
                     if result:
                         break
         if not result:
-            info = super(L3RouterApplianceDBMixin,
-                         self).create_floatingip(context,
-                                                 floatingip, initial_status)
-            router_ids = [info['router_id']] if info['router_id'] else []
+            result = super(L3RouterApplianceDBMixin,
+                           self).create_floatingip(context,
+                                                   floatingip, initial_status)
+            router_ids = [result['router_id']] if result['router_id'] else []
         context.result = result
         if driver:
             driver.create_floatingip_postcommit(context, fip_ctxt)
