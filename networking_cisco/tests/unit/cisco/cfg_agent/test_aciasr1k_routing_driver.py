@@ -139,8 +139,9 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         self.ex_gw_port['hosting_info']['global_config'] = [
             [self.GLOBAL_CFG_STRING_1, self.GLOBAL_CFG_STRING_2]]
         net = netaddr.IPNetwork(self.TEST_CIDR)
-        self.TEST_SNAT_POOL_ID = (driver.NAT_POOL_PREFIX +
-            self.TEST_SNAT_ID[:self.driver.NAT_POOL_ID_LEN] + '_nat_pool')
+        self.snat_prefix = (driver.NAT_POOL_PREFIX +
+            self.TEST_SNAT_ID[:self.driver.NAT_POOL_ID_LEN])
+        self.TEST_SNAT_POOL_ID = self.snat_prefix + '_nat_pool'
         self.TEST_CIDR_SNAT_IP = str(netaddr.IPAddress(net.first + 2))
         self.TEST_CIDR_SECONDARY_IP = str(netaddr.IPAddress(net.last - 1))
 
