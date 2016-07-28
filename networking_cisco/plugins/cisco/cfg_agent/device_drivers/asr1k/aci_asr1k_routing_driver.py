@@ -462,6 +462,21 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
         self._edit_running_config(confstr,
                                   'REMOVE_STATIC_SRC_TRL_NO_VRF_MATCH')
 
+    def _snat_prefix(self, subnet):
+        snat_id = NAT_POOL_PREFIX + subnet['id'][:self.NAT_POOL_ID_LEN]
+        if cfg.CONF.multi_region.enable_multi_region:
+            prefix = "%s-%s" % (snat_id, cfg.CONF.multi_region.region_id)
+        else:
+            prefix = snat_id
+        return prefix
+
+    def _get_snat_prefix(self, ri, ext_port):
+        subnets = ext_port['hosting_info'].get('snat_subnets', [])
+        if subnets:
+            # TODO(tbachman) Currently we'll only have a single
+            # subnet, but this may change in the future
+            return self._snat_prefix(subnets[0])
+
     def _do_set_snat_pool(self, pool_name, pool_start,
                           pool_end, pool_net, is_delete):
         try:
@@ -552,13 +567,8 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
         return str(pid)
 
     def _get_snat_pool_name(self, subnet):
-        snat_prefix = NAT_POOL_PREFIX + subnet['id'][:self.NAT_POOL_ID_LEN]
-        if cfg.CONF.multi_region.enable_multi_region:
-            snat_id = "%s-%s_nat_pool" % (snat_prefix,
-                cfg.CONF.multi_region.region_id)
-        else:
-            snat_id = "%s_nat_pool" % (snat_prefix)
-        return snat_id
+        snat_prefix = self._snat_prefix(subnet)
+        return "%s_nat_pool" % (snat_prefix)
 
     def _add_rid_to_snat_list(self, ri, ext_gw_port, subnet):
         net = netaddr.IPNetwork(subnet['cidr'])
