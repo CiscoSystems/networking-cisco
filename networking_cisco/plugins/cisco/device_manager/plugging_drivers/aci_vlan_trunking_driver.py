@@ -127,16 +127,12 @@ class AciVLANTrunkingPlugDriver(hw_vlan.HwVLANTrunkingPlugDriver):
             return None
 
     def _get_vrf_context_gbp(self, context, router_id, port_db):
-        # TODO(tbachman): inefficient - should be fixed
-        l3p_list = self.apic_driver.gbp_plugin.get_l3_policies(
-            context.elevated(), filters={'routers': [router_id]})
-        for l3p in l3p_list:
-            if l3p.get('routers') and router_id in l3p['routers']:
-                break
-        if not l3p_list or not l3p:
+        l3p_id = self.apic_driver.gbp_plugin.get_l3p_id_from_router_id(
+            context.elevated(), router_id)
+        if not l3p_id:
             return None
-        return {'vrf_id': l3p['id'],
-                'vrf_name': l3p['id'],
+        return {'vrf_id': l3p_id,
+                'vrf_name': l3p_id,
                 'vrf_tenant': None}
 
     def _get_vrf_context_neutron(self, context, router_id, port_db):

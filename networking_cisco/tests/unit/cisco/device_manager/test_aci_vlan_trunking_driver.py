@@ -293,8 +293,8 @@ class TestAciVLANTrunkingPlugDriverGbp(
         manager.NeutronManager.get_service_plugins = mock.MagicMock(
             return_value=self._l3_plugins)
         plug = aci_vlan.AciVLANTrunkingPlugDriver()
-        plug.apic_driver.gbp_plugin.get_l3_policies = mock.Mock(
-            return_value=[{'id': 'l3p_id', 'routers': ['somerouterid']}])
+        plug.apic_driver.gbp_plugin.get_l3p_id_from_router_id = mock.Mock(
+            return_value='somerouterid')
         plug.apic_driver.l3out_vlan_alloc.get_vlan_allocated = self._stub_vlan
         self.plugging_driver = plug
         self.vlan_dict = {'net1': APIC_VLAN1,
@@ -318,9 +318,8 @@ class TestAciVLANTrunkingPlugDriverGbp(
 
     def _set_apic_driver_mocks(self, router):
         apic_driver = self.plugging_driver.apic_driver
-        apic_driver.gbp_plugin.get_l3_policies = mock.Mock(
-            return_value=[{'id': router['id'],
-                           'routers': [router['id']]}])
+        apic_driver.gbp_plugin.get_l3p_id_from_router_id = mock.Mock(
+            return_value=router['id'])
         apic_driver.get_vrf_details = mock.Mock(
             return_value={'l3_policy_id': router['id']})
 
