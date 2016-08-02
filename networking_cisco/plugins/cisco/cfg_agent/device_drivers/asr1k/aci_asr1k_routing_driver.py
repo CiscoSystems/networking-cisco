@@ -59,7 +59,8 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
         self.hosting_device = {'id': device_params.get('id'),
                                'device_id': device_params.get('device_id')}
         self._template_dict = {'vrf': self._set_vrf,
-                               'vrf_pid': self._set_vrf_pid}
+                               'vrf_pid': self._set_vrf_pid,
+                               'rid': self._set_router_id}
         self._router_ids_by_snat_id = {}
         self._subnets_by_ext_net = {}
         # We need to limit the prefix to the overall DEV_NAME_LEN
@@ -558,13 +559,19 @@ class AciASR1kRoutingDriver(asr1k.ASR1kRoutingDriver):
         return self._get_vrf_name(ri)
 
     def _set_vrf_pid(self, ri, port, config):
-        # Convert a VRF to a process iD for a router instance
+        # Convert a VRF to a process ID for a router instance
         vrf = self._get_vrf_name(ri).strip('nrouter-')[:6]
         # strip to 4 characters to limit pid to 16-bit value
         # (limit on ASR)
         # TODO(tbachman): fix to ensure PID uniqueness
         pid = int(hashlib.md5(vrf).hexdigest()[:4], 16)
         return str(pid)
+
+    def _set_router_id(self, ri, port, config):
+        # Convert a VRF to a router ID for a router instance
+        vrf = self._get_vrf_name(ri).strip('nrouter-')[:6]
+        rid = netaddr.IPAddress(int(vrf, 16))
+        return str(rid)
 
     def _get_snat_pool_name(self, subnet):
         snat_prefix = self._snat_prefix(subnet)
