@@ -1261,8 +1261,6 @@ class ConfigSyncer(object):
 
             # self.existing_cfg_dict['interfaces'][intf.segment_id] = intf
 
-            correct_grp_num = int(db_intf[ha.HA_INFO]['group'])
-
             if intf.is_external:
                 intf_db = self.segment_gw_dict
             else:
@@ -1296,6 +1294,8 @@ class ConfigSyncer(object):
             needs_hsrp_delete = False
             for hsrp_cfg in hsrp_cfg_list:
                 hsrp_num = int(hsrp_cfg.re_match(HSRP_REGEX, group=1))
+                correct_grp_num = int(db_intf[ha.HA_INFO]['group'])
+
                 if hsrp_num != correct_grp_num:
                     needs_hsrp_delete = True
                     #del_hsrp_cmd += XML_CMD_TAG % ("no %s" % (hsrp_cfg.text))
