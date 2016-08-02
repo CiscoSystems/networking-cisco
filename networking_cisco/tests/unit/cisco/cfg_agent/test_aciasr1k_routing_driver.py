@@ -76,6 +76,7 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         self.transit_vlan = '1035'
         self.GLOBAL_CFG_STRING_1 = 'router ospf {vrf_pid} vrf {vrf}'
         self.GLOBAL_CFG_STRING_2 = 'area 0.0.0.1 nssa'
+        self.GLOBAL_CFG_STRING_3 = 'router-id {rid}'
         self.int_port_w_config = (
             {'id': PORT_ID,
              'ip_cidr': self.gw_ip_cidr,
@@ -137,7 +138,9 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
         self.ex_gw_port['cidr_exposed'] = self.transit_cidr
         self.ex_gw_port['extra_subnets'] = []
         self.ex_gw_port['hosting_info']['global_config'] = [
-            [self.GLOBAL_CFG_STRING_1, self.GLOBAL_CFG_STRING_2]]
+            [self.GLOBAL_CFG_STRING_1,
+             self.GLOBAL_CFG_STRING_2,
+             self.GLOBAL_CFG_STRING_3]]
         net = netaddr.IPNetwork(self.TEST_CIDR)
         self.snat_prefix = (driver.NAT_POOL_PREFIX +
             self.TEST_SNAT_ID[:self.driver.NAT_POOL_ID_LEN])
@@ -265,6 +268,10 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
             self.GLOBAL_CFG_STRING_1.format(
                 vrf=self.vrf, vrf_pid=self.vrf_pid))
         cfg_global += snippets.SET_GLOBAL_CONFIG % (self.GLOBAL_CFG_STRING_2)
+        rid = netaddr.IPAddress(int(self.vrf.strip('nrouter-')[:6], 16))
+        cfg_global += snippets.SET_GLOBAL_CONFIG % (
+            self.GLOBAL_CFG_STRING_3.format(
+                rid=str(rid)))
         cfg_global += snippets.GLOBAL_CONFIG_POSTFIX
         self.assert_edit_run_cfg(cfg_global, None)
 
@@ -280,6 +287,10 @@ class ASR1kRoutingDriverAci(asr1ktest.ASR1kRoutingDriver):
                 vrf=self.vrf, vrf_pid=self.vrf_pid))
         cfg_global += snippets.REMOVE_GLOBAL_CONFIG % (
             self.GLOBAL_CFG_STRING_2)
+        rid = netaddr.IPAddress(int(self.vrf.strip('nrouter-')[:6], 16))
+        cfg_global += snippets.REMOVE_GLOBAL_CONFIG % (
+            self.GLOBAL_CFG_STRING_3.format(
+                rid=str(rid)))
         cfg_global += snippets.GLOBAL_CONFIG_POSTFIX
         self.assert_edit_run_cfg(cfg_global, None)
         self.port = self.int_port
