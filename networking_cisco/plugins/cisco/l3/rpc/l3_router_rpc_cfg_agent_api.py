@@ -31,7 +31,7 @@ LOG = logging.getLogger(__name__)
 L3AGENT_SCHED = constants.L3_AGENT_SCHEDULER_EXT_ALIAS
 CFGAGENT_SCHED = ciscocfgagentscheduler.CFG_AGENT_SCHEDULER_ALIAS
 CFG_AGENT_L3_ROUTING = cisco_constants.CFG_AGENT_L3_ROUTING
-
+import pdb
 
 class L3RouterCfgAgentNotifyAPI(object):
     """API for plugin to notify Cisco cfg agent."""
@@ -43,8 +43,9 @@ class L3RouterCfgAgentNotifyAPI(object):
 
     def _agent_notification_bulk(self, context, method, routers,
                                  hosting_device, operation):
-        """Notify the Cisco cfg agent handling a particular hosting_device
-        about operation on routers. This results in a single notification.
+        """Notify the Cisco cfg agent handling a particular hosting_device.
+
+        A single notification can contain multiple routers.
         """
         admin_context = context.is_admin and context or context.elevated()
         dmplugin = manager.NeutronManager.get_service_plugins().get(
@@ -67,8 +68,9 @@ class L3RouterCfgAgentNotifyAPI(object):
                 cctxt.cast(context, method, routers=routers)
 
     def _agent_notification(self, context, method, routers, operation,
-                            shuffle_agents):
+                            shuffle_agents, bgp=False):
         """Notify individual Cisco cfg agents."""
+
         admin_context = context.is_admin and context or context.elevated()
         dmplugin = manager.NeutronManager.get_service_plugins().get(
             cisco_constants.DEVICE_MANAGER)
@@ -88,7 +90,12 @@ class L3RouterCfgAgentNotifyAPI(object):
                            'host': agent.host,
                            'method': method})
                 cctxt = self.client.prepare(server=agent.host)
-                cctxt.cast(context, method, routers=[router['id']])
+                if bgp:
+                    cctxt.cast(context, method, bgp_speaker=router['speaker'], 
+                        host=router['hosting_device'])
+                else:
+                    cctxt.cast(context, method, routers=[router['id']])
+
 
     def _notification(self, context, method, routers, operation,
                       shuffle_agents):
@@ -110,7 +117,7 @@ class L3RouterCfgAgentNotifyAPI(object):
 
     def routers_updated(self, context, routers, operation=None, data=None,
                         shuffle_agents=False):
-        """Notifies cfg agents about configuration changes to routers.
+        """Notify cfg agents about configuration changes to routers.
 
         This includes operations performed on the router like when a
         router interface is added or removed.
@@ -120,19 +127,18 @@ class L3RouterCfgAgentNotifyAPI(object):
                                shuffle_agents)
 
     def router_removed_from_hosting_device(self, context, router):
-        """Notification that router has been removed from hosting device."""
+        """Notify cfg agent about router removed from hosting device."""
         self._notification(context, 'router_removed_from_hosting_device',
                            [router], operation=None, shuffle_agents=False)
 
     def router_added_to_hosting_device(self, context, router):
-        """Notification that router has been added to hosting device."""
+        """Notify cfg agent about router added to hosting device."""
         self._notification(context, 'router_added_to_hosting_device',
                            [router], operation=None, shuffle_agents=False)
 
     def routers_removed_from_hosting_device(self, context, router_ids,
                                             hosting_device):
-        """Notification that one or several routers have been removed from
-        hosting device.
+        """Notify cfg agent that routers have been removed from hosting device.
         @param: context - information about tenant, user etc
         @param: router-ids - list of ids
         @param: hosting_device - device hosting the routers
@@ -140,3 +146,42 @@ class L3RouterCfgAgentNotifyAPI(object):
         self._agent_notification_bulk(
             context, 'router_removed_from_hosting_device', router_ids,
             hosting_device, operation=None)
+
+
+    def bgp_speaker_created(self, context, bgp_hd_db, peer=False):
+        bgp_hd_db['id'] = bgp_hd_db['speaker_id']
+        # if peer:
+        #     self._agent_notification(context, 'p_bgp_speaker_create_end', [bgp_speaker], 
+        #         None, False, True)
+        # else:
+        self._agent_notification(context, 'bgp_speaker_create_end', [bgp_hd_db], 
+            None, False, True)
+
+    def bgp_speaker_deleted(self, context, bgp_hd_db):
+        bgp_hd_db['id'] = bgp_hd_db['speaker_id']
+        self._agent_notification(context, 'bgp_speaker_remove_end', [bgp_hd_db],
+            None, False, True)
+
+    # def bgp_peer_created(self, context, bgp_peer):
+    #     bgp_eer
+
+    def bgp_speaker_peer_added(self, context, bgp_hd_db, bgp_peer, peer=False):
+        bgp_hd_db['id'] = bgp_hd_db['speaker_id']
+        bgp_hd_db['speaker']['bgp_peer'] = bgp_peer
+        if peer:
+            self._agent_notification(context, 'p_bgp_speaker_peer_added_end', [bgp_hd_db],
+                None, False, True)
+        else:
+            self._agent_notification(context, 'bgp_speaker_peer_added_end', [bgp_hd_db],
+                None, False, True)
+
+    def bgp_speaker_peer_removed(self, context, bgp_hd_db, bgp_peer):
+        bgp_hd_db['id'] = bgp_hd_db['speaker_id']
+        bgp_hd_db['speaker']['bgp_peer'] = bgp_peer
+        self._agent_notification(context, 'bgp_speaker_peer_remove_end', [bgp_hd_db],
+            None, False, True)        
+
+
+
+
+

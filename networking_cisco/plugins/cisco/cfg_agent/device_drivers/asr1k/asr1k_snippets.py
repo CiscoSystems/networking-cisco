@@ -380,6 +380,20 @@ DELETE_NAT_POOL = """
 """
 
 # ===================================================
+# Disable HSRP preempt on an interface
+# $(config)interface GigabitEthernet 2.500
+# $(config)no standby 1621 preempt
+# ===================================================
+REMOVE_INTC_ASR_HSRP_PREEMPT = """
+<config>
+        <cli-config-data>
+            <cmd>interface %s</cmd>
+            <cmd>no standby %s preempt</cmd>
+        </cli-config-data>
+</config>
+"""
+
+# ===================================================
 # Empty snippet (for polling netconf session status)
 # ===================================================
 EMPTY_SNIPPET = """
@@ -389,3 +403,91 @@ EMPTY_SNIPPET = """
         </cli-config-data>
 </config>
 """
+
+# CREATE_BGP_SPEAKER = """
+# <config>
+#         <cli-config-data>
+#             <cmd>router bgp %s</cmd>
+#             <cmd>bgp router-id %s</cmd>
+#             <cmd>bgp log-neighbor-changes</cmd>
+#             <cmd>neighbor 10.86.7.55 remote-as 1234</cmd>
+#             <cmd>address-family ipv4</cmd>
+#             <cmd>neighbor 10.86.7.55 activate</cmd>
+#             <cmd>network 15.1.1.10 mask 255.255.255.255</cmd>
+#             <cmd>no auto-summary</cmd>
+#             <cmd>exit-address-family</cmd>
+#             <cmd>ip route 15.1.1.10 255.255.255.255 Null0</cmd>
+#         </cli-config-data>
+# </config>
+# """
+
+CREATE_BGP_SPEAKER = """
+<config>
+        <cli-config-data>
+            <cmd>router bgp %s</cmd>
+            <cmd>bgp router-id %s</cmd>
+        </cli-config-data>
+</config>
+"""
+
+CREATE_PEER_BGP_SPEAKER = """
+<config>
+        <cli-config-data>
+            <cmd>router bgp %s</cmd>
+            <cmd>bgp router-id %s</cmd>
+        </cli-config-data>
+</config>
+"""
+
+BGP_SPEAKER_PEER_ADD = """
+<config>
+        <cli-config-data>
+            <cmd>router bgp %s</cmd>
+            <cmd>bgp router-id %s</cmd>
+            <cmd>bgp log-neighbor-changes</cmd>
+            <cmd>neighbor %s remote-as %s</cmd>
+            <cmd>address-family ipv4</cmd>
+            <cmd>neighbor %s activate</cmd>
+            <cmd>network 15.1.1.10 mask 255.255.255.255</cmd>
+            <cmd>no auto-summary</cmd>
+            <cmd>exit-address-family</cmd>
+            <cmd>ip route 15.1.1.10 255.255.255.255 Null0</cmd>
+        </cli-config-data>
+</config>
+"""
+
+P_BGP_SPEAKER_PEER_ADD = """
+<config>
+        <cli-config-data>
+            <cmd>router bgp %s</cmd>
+            <cmd>bgp router-id %s</cmd>
+            <cmd>bgp log-neighbor-changes</cmd>
+            <cmd>neighbor %s remote-as %s</cmd>
+            <cmd>address-family ipv4</cmd>
+            <cmd>neighbor %s activate</cmd>
+            <cmd>no auto-summary</cmd>
+            <cmd>exit-address-family</cmd>
+        </cli-config-data>
+</config>
+"""
+
+BGP_SPEAKER_PEER_REMOVE = """
+<config>
+        <cli-config-data>
+            <cmd>router bgp %s</cmd>
+            <cmd>no neighbor %s remote-as %s</cmd>
+        </cli-config-data>
+</config>
+"""
+
+REMOVE_BGP_SPEAKER = """
+<config>
+        <cli-config-data>
+            <cmd>no router bgp %s</cmd>
+        </cli-config-data>
+</config>
+"""
+
+
+
+

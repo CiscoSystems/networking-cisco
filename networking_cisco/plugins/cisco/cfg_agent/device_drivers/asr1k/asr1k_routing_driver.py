@@ -15,12 +15,10 @@
 import logging
 import netaddr
 
+from neutron_lib import constants
 from oslo_config import cfg
 
-from neutron.common import constants
-from neutron.i18n import _LE
-from neutron.i18n import _LI
-
+from networking_cisco._i18n import _, _LE, _LI
 from networking_cisco.plugins.cisco.cfg_agent import cfg_exceptions as cfg_exc
 from networking_cisco.plugins.cisco.cfg_agent.device_drivers.asr1k import (
     asr1k_cfg_syncer)
@@ -33,7 +31,7 @@ from networking_cisco.plugins.cisco.cfg_agent.device_drivers.csr1kv import (
 from networking_cisco.plugins.cisco.common import cisco_constants
 from networking_cisco.plugins.cisco.extensions import ha
 from networking_cisco.plugins.cisco.extensions import routerrole
-
+import pdb
 LOG = logging.getLogger(__name__)
 
 
@@ -127,41 +125,35 @@ class ASR1kRoutingDriver(iosxe_driver.IosXeRoutingDriver):
 
     def disable_internal_network_NAT(self, ri, port, ext_gw_port,
                                      itfc_deleted=False):
-
         self._remove_internal_nw_nat_rules(ri,
                                            [port],
                                            ext_gw_port,
                                            itfc_deleted)
 
     def enable_router_interface(self, ri, port):
-
         # Enable the router interface
         interface = self._get_interface_name_from_hosting_port(port)
-        self._create_sub_interface_enable_only(interface)
+        self._create_sub_interface_enable(interface)
 
     def disable_router_interface(self, ri, port=None):
-
         # Disable the router interface
         if not port:
             ex_gw_port = ri.router.get('gw_port', None)
             if ex_gw_port:
-                ext_interface = (
-                    self._get_interface_name_from_hosting_port(ex_gw_port))
-                self._create_sub_interface_disable_only(ext_interface)
+                ext_interface = (self._get_interface_name_from_hosting_port(
+                                 ex_gw_port))
+                self._create_sub_interface_disable(ext_interface)
             internal_ports = ri.router.get(constants.INTERFACE_KEY, [])
             for port in internal_ports:
                 internal_interface = (
-                    self._get_interface_name_from_hosting_port(port))
-                self._create_sub_interface_disable_only(internal_interface)
+                        self._get_interface_name_from_hosting_port(port))
+                self._create_sub_interface_disable(internal_interface)
         else:
             interface = self._get_interface_name_from_hosting_port(port)
-            self._create_sub_interface_disable_only(interface)
+            self._create_sub_interface_disable(interface)
 
     def cleanup_invalid_cfg(self, hd, routers):
-
-        cfg_syncer = asr1k_cfg_syncer.ConfigSyncer(routers,
-                                                   self,
-                                                   hd)
+        cfg_syncer = asr1k_cfg_syncer.ConfigSyncer(routers, self, hd)
         cfg_syncer.delete_invalid_cfg()
 
     def get_configuration(self):
@@ -223,6 +215,7 @@ class ASR1kRoutingDriver(iosxe_driver.IosXeRoutingDriver):
         return True
 
     def _handle_external_gateway_added_global_router(self, ri, ext_gw_port):
+        # TODO(bobmel): Get the HA virtual IP correctly
         # TODO(sridar):
         # This seems to work fine. Keeping this todo until more testing.
         virtual_gw_port = ext_gw_port[ha.HA_INFO]['ha_port']
@@ -253,13 +246,11 @@ class ASR1kRoutingDriver(iosxe_driver.IosXeRoutingDriver):
             LOG.debug("Adding IPv4 external network port: %(port)s for tenant "
                       "router %(r_id)s", {'port': ext_gw_port['id'],
                                           'r_id': ri.id})
-            if ri.router['admin_state_up'] is False:
-                self._create_sub_interface_disable_only(sub_interface)
+            if ri.router['admin_state_up'] and ext_gw_port['admin_state_up']:
+                self._create_sub_interface_enable(sub_interface)
             else:
-                if ext_gw_port['admin_state_up'] is False:
-                    self._create_sub_interface_disable_only(sub_interface)
-                else:
-                    self._create_sub_interface_enable_only(sub_interface)
+                self._create_sub_interface_disable(sub_interface)
+
         if ex_gw_ip:
             # Set default route via this network's gateway ip
             if self._is_port_v6(ext_gw_port):
@@ -323,13 +314,13 @@ class ASR1kRoutingDriver(iosxe_driver.IosXeRoutingDriver):
                         ip, mask))
         self._edit_running_config(conf_str, 'CREATE_SUBINTERFACE_WITH_ID')
 
-    def _create_sub_interface_enable_only(self, sub_interface):
+    def _create_sub_interface_enable(self, sub_interface):
         LOG.debug("Enabling network sub interface: %s",
                   sub_interface)
         conf_str = snippets.ENABLE_INTF % sub_interface
         self._edit_running_config(conf_str, 'ENABLE_INTF')
 
-    def _create_sub_interface_disable_only(self, sub_interface):
+    def _create_sub_interface_disable(self, sub_interface):
         LOG.debug("Disabling network sub interface: %s",
                   sub_interface)
         conf_str = snippets.DISABLE_INTF % sub_interface
@@ -509,6 +500,10 @@ class ASR1kRoutingDriver(iosxe_driver.IosXeRoutingDriver):
     def _is_port_v6(port):
         return netaddr.IPNetwork(port['subnets'][0]['cidr']).version == 6
 
+    @staticmethod
+    def _get_hsrp_grp_num_from_ri(ri):
+        return ri.router['ha_info']['group']
+
     def _add_internal_nw_nat_rules(self, ri, port, ext_port):
         vrf_name = self._get_vrf_name(ri)
         acl_no = self._generate_acl_num_from_port(port)
@@ -591,7 +586,6 @@ class ASR1kRoutingDriver(iosxe_driver.IosXeRoutingDriver):
         for port in ports:
             in_itfc_name = self._get_interface_name_from_hosting_port(port)
             acls.append(self._generate_acl_num_from_port(port))
-
             if not intf_deleted:
                 self._remove_interface_nat(in_itfc_name, 'inside')
         # There is a possibility that the dynamic NAT rule cannot be removed
@@ -666,3 +660,37 @@ class ASR1kRoutingDriver(iosxe_driver.IosXeRoutingDriver):
             (fixed_ip, floating_ip, vrf, hsrp_grp, vlan))
         self._edit_running_config(confstr,
                                   'REMOVE_STATIC_SRC_TRL_NO_VRF_MATCH')
+
+    def _asr_create_bgp_speaker(self, bgp_speaker, host, peer=False):
+        confstr = (asr1k_snippets.CREATE_BGP_SPEAKER % 
+            (str(bgp_speaker['local_as']), host['management_ip_address']))
+        self._edit_running_config(confstr, 'CREATE_BGP_SPEAKER')
+
+    def _asr_remove_bgp_speaker(self, bgp_speaker, host):
+        confstr = (asr1k_snippets.REMOVE_BGP_SPEAKER % 
+            str(bgp_speaker['local_as']))
+        self._edit_running_config(confstr, 'REMOVE_BGP_SPEAKER')
+
+    def _asr_add_bgp_peer(self, bgp_speaker, bgp_peer, host, peer=False):
+        if peer:
+            confstr = (asr1k_snippets.P_BGP_SPEAKER_PEER_ADD %
+            (str(bgp_speaker['local_as']), host['management_ip_address'], 
+                bgp_peer['peer_ip'], bgp_peer['remote_as'], 
+                bgp_peer['peer_ip']))
+            self._edit_running_config(confstr, 'P_BGP_SPEAKER_PEER_ADD')
+        else:
+            confstr = (asr1k_snippets.BGP_SPEAKER_PEER_ADD %
+                (str(bgp_speaker['local_as']), host['management_ip_address'], 
+                    bgp_peer['peer_ip'], bgp_peer['remote_as'], 
+                    bgp_peer['peer_ip']))
+            self._edit_running_config(confstr, 'BGP_SPEAKER_PEER_ADD')
+
+    def _asr_remove_bgp_peer(self, bgp_speaker, bgp_peer):
+        confstr = (asr1k_snippets.BGP_SPEAKER_PEER_REMOVE %
+            (str(bgp_speaker['local_as']), bgp_peer['peer_ip'],
+                bgp_peer['remote_as']))
+        self._edit_running_config(confstr, 'BGP_SPEAKER_PEER_REMOVE')
+
+
+
+

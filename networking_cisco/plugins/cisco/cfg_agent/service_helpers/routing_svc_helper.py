@@ -14,14 +14,15 @@
 
 import collections
 import eventlet
-from ncclient.transport import errors as ncc_errors
 import netaddr
 import pprint as pp
 
+# from ncclient.transport import errors as ncc_errors
 from oslo_config import cfg
 from oslo_log import log as logging
 import oslo_messaging
 from oslo_utils import excutils
+from oslo_utils import importutils
 import six
 
 from neutron.common import constants as l3_constants
@@ -29,8 +30,11 @@ from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.common import utils as common_utils
 from neutron import context as n_context
-from neutron.i18n import _LE, _LI, _LW
 
+from networking_cisco._i18n import _
+from networking_cisco._i18n import _LE
+from networking_cisco._i18n import _LI
+from networking_cisco._i18n import _LW
 from networking_cisco.plugins.cisco.cfg_agent import cfg_exceptions
 from networking_cisco.plugins.cisco.cfg_agent.device_drivers import driver_mgr
 from networking_cisco.plugins.cisco.cfg_agent import device_status
@@ -38,6 +42,10 @@ from networking_cisco.plugins.cisco.common import (cisco_constants as
                                                    c_constants)
 from networking_cisco.plugins.cisco.extensions import ha
 from networking_cisco.plugins.cisco.extensions import routerrole
+
+import pdb
+
+ncc_errors = importutils.try_import('ncclient.transport.errors')
 
 LOG = logging.getLogger(__name__)
 
@@ -69,6 +77,7 @@ class RouterInfo(object):
         self._router = None
         self.router = router
         self.routes = []
+        self.ha_info = router.get('ha_info')
 
     @property
     def router(self):
@@ -149,6 +158,10 @@ class CiscoRoutingPluginApi(object):
         return cctxt.call(context, 'update_port_statuses_cfg',
                           port_ids=port_ids, status=status)
 
+    def get_speakers(self, context, speaker_ids):
+        cctxt = self.client.prepare(version='1.1')
+        return cctxt.call(context, 'cfg_sync_speakers', speaker_ids=speaker_ids)
+
 
 class RoutingServiceHelper(object):
 
@@ -205,6 +218,7 @@ class RoutingServiceHelper(object):
 
     def router_added_to_hosting_device(self, context, routers):
         LOG.debug('Got router added to hosting device :%s', routers)
+
         self.routers_updated(context, routers)
 
     # version 1.1
@@ -244,65 +258,13 @@ class RoutingServiceHelper(object):
                     LOG.debug("Updated routers:%s", router_ids)
                     self.updated_routers.clear()
                     routers = self._fetch_router_info(router_ids=router_ids)
+                    # speakers = self._fetch_bgp_speaker_info()
                     LOG.debug("Updated routers:%s" % (pp.pformat(routers)))
                 if device_ids:
                     LOG.debug("Adding new devices:%s", device_ids)
                     self.sync_devices = set(device_ids) | self.sync_devices
                 if self.sync_devices:
-                    sync_devices_list = list(self.sync_devices)
-                    LOG.debug("Fetching routers on devices :%s",
-                              sync_devices_list)
-
-                    fetched_routers = self._fetch_router_info(
-                        device_ids=sync_devices_list)
-
-                    if fetched_routers:
-                        LOG.debug("[sync_devices] Fetched routers :%s",
-                                  pp.pformat(fetched_routers))
-                        # clear router_config cache
-                        for router_dict in fetched_routers:
-                            self.updated_routers.discard(router_dict['id'])
-                            self.removed_routers.discard(router_dict['id'])
-                            LOG.debug("[sync_devices] invoking "
-                                      "_router_removed(%s)",
-                                      router_dict['id'])
-                            self._router_removed(router_dict['id'],
-                                                 deconfigure=False)
-
-                        self._cleanup_invalid_cfg(fetched_routers)
-
-                        routers.extend(fetched_routers)
-                        self.sync_devices.clear()
-                        LOG.debug("[sync_devices] %s finished",
-                                  sync_devices_list)
-
-                    else:
-                        # If the initial attempt to sync a device
-                        # failed, retry again (by not clearing sync_devices)
-                        # Normal updated_routers processing is still allowed
-                        # to happen
-                        self.sync_devices_attempts = (
-                            self.sync_devices_attempts + 1)
-
-                        if (self.sync_devices_attempts >=
-                            cfg.CONF.cfg_agent.max_device_sync_attempts):
-
-                            LOG.debug("Max number [%d / %d ] of sync_devices "
-                                 "attempted.  No further retries will "
-                                 "be attempted." %
-                                 (self.sync_devices_attempts,
-                                 cfg.CONF.cfg_agent.max_device_sync_attempts))
-                            self.sync_devices.clear()
-                            self.sync_devices_attempts = 0
-                        else:
-                            LOG.debug("Fetched routers was blank for sync"
-                                   " attempt [%d / %d], will attempt "
-                                   "resync of %s devices again in"
-                                   " the next iteration" %
-                                   (self.sync_devices_attempts,
-                                   cfg.CONF.cfg_agent.max_device_sync_attempts,
-                                   pp.pformat(self.sync_devices)))
-
+                    self._handle_sync_devices(routers)
                 if removed_devices_info:
                     if removed_devices_info.get('deconfigure'):
                         ids = self._get_router_ids_from_removed_devices_info(
@@ -323,7 +285,6 @@ class RoutingServiceHelper(object):
                 resources['removed_routers'] = removed_routers
             hosting_devices = self._sort_resources_per_hosting_device(
                 resources)
-
             # Dispatch process_services() for each hosting device
             pool = eventlet.GreenPool()
             for device_id, resources in hosting_devices.items():
@@ -417,7 +378,81 @@ class RoutingServiceHelper(object):
         except oslo_messaging.MessagingException:
             LOG.exception(_LE("RPC Error in fetching routers from plugin"))
             self.fullsync = True
-            raise
+
+    # bgp process
+    def _fetch_bgp_speaker_info(self, speaker_ids=None, device_ids=None):
+        try:
+            return self.plugin_rpc.get_speakers(self.context, 
+                                                speaker_ids=speaker_ids)
+        except oslo_messaging.MessagingException:
+           LOG.exception(_LE("RPC Error in fetching routers from plugin"))
+
+    def _handle_sync_devices(self, routers):
+        """
+        Handles routers during a device_sync.
+
+        This method performs post-processing on routers fetched from the
+        routing plugin during a device sync.  Routers are first fetched
+        from the plugin based on the list of device_ids.  Since fetched
+        routers take precedence over pending work, matching router-ids
+        buffered in update_routers and removed_routers are discarded.
+        The existing router cache is also cleared in order to properly
+        trigger updates and deletes.  Lastly, invalid configuration in
+        the underlying hosting-device is deleted via _cleanup_invalid_cfg.
+
+        Modifies updated_routers, removed_routers, and sync_devices
+        attributes
+
+        :param routers: working list of routers as populated in
+                        process_services
+        """
+        sync_devices_list = list(self.sync_devices)
+        LOG.debug("Fetching routers on:%s", sync_devices_list)
+        fetched_routers = self._fetch_router_info(device_ids=sync_devices_list)
+
+        if fetched_routers:
+            LOG.debug("[sync_devices] Fetched routers :%s",
+                      pp.pformat(fetched_routers))
+
+            # clear router_config cache
+            for router_dict in fetched_routers:
+                self.updated_routers.discard(router_dict['id'])
+                self.removed_routers.discard(router_dict['id'])
+                LOG.debug("[sync_devices] invoking "
+                          "_router_removed(%s)",
+                          router_dict['id'])
+                self._router_removed(router_dict['id'],
+                                     deconfigure=False)
+
+            self._cleanup_invalid_cfg(fetched_routers)
+            routers.extend(fetched_routers)
+            self.sync_devices.clear()
+            LOG.debug("[sync_devices] %s finished",
+                      sync_devices_list)
+        else:
+            # If the initial attempt to sync a device
+            # failed, retry again (by not clearing sync_devices)
+            # Normal updated_routers processing is still allowed
+            # to happen
+            self.sync_devices_attempts += 1
+
+            if (self.sync_devices_attempts >=
+                cfg.CONF.cfg_agent.max_device_sync_attempts):
+
+                LOG.debug("Max number [%d / %d ] of sync_devices "
+                          "attempted.  No further retries will "
+                          "be attempted." %
+                          (self.sync_devices_attempts,
+                           cfg.CONF.cfg_agent.max_device_sync_attempts))
+                self.sync_devices.clear()
+                self.sync_devices_attempts = 0
+            else:
+                LOG.debug("Fetched routers was blank for sync attempt "
+                          "[%d / %d], will attempt resync of %s devices "
+                          "again in the next iteration" %
+                          (self.sync_devices_attempts,
+                           cfg.CONF.cfg_agent.max_device_sync_attempts,
+                           pp.pformat(self.sync_devices)))
 
     @staticmethod
     def _get_router_ids_from_removed_devices_info(removed_devices_info):
@@ -514,6 +549,8 @@ class RoutingServiceHelper(object):
             deleted_routerids_list = []
 
             for r in routers:
+                if not r['admin_state_up']:
+                        continue
                 cur_router_ids.add(r['id'])
 
             # identify list of routers(ids) that no longer exist
@@ -541,6 +578,8 @@ class RoutingServiceHelper(object):
                     self.updated_routers.add(r['id'])
                     continue
                 try:
+                    if not r['admin_state_up']:
+                        continue
                     cur_router_ids.add(r['id'])
                     hd = r['hosting_device']
                     if not self._dev_status.is_hosting_device_reachable(hd):
@@ -557,8 +596,8 @@ class RoutingServiceHelper(object):
                         _LE("ncclient Unexpected session close %s"), e)
                     if not self._dev_status.is_hosting_device_reachable(
                         r['hosting_device']):
-                        LOG.debug("Lost connectivity to Hosting Device %s" % (
-                                  r['hosting_device']['id']))
+                        LOG.debug("Lost connectivity to Hosting Device %s" %
+                                  r['hosting_device']['id'])
                         # Will rely on heartbeat to detect hd state
                         # and schedule resync when hd comes back
                     else:
@@ -626,6 +665,7 @@ class RoutingServiceHelper(object):
         """
         try:
             ex_gw_port = ri.router.get('gw_port')
+            ri.ha_info = ri.router.get('ha_info', None)
             internal_ports = ri.router.get(l3_constants.INTERFACE_KEY, [])
 
             existing_port_ids = set([p['id'] for p in ri.internal_ports])
@@ -665,9 +705,9 @@ class RoutingServiceHelper(object):
             if ex_gw_port:
                 self._process_router_floating_ips(ri, ex_gw_port)
 
-            if ri.router[ROUTER_ROLE_ATTR] not in \
-                    [c_constants.ROUTER_ROLE_GLOBAL,
-                     c_constants.ROUTER_ROLE_LOGICAL_GLOBAL]:
+            if ri.router[ROUTER_ROLE_ATTR] not in [
+                    c_constants.ROUTER_ROLE_GLOBAL,
+                    c_constants.ROUTER_ROLE_LOGICAL_GLOBAL]:
                 if not ri.router['admin_state_up']:
                     self._disable_router_interface(ri)
                 else:
@@ -803,9 +843,9 @@ class RoutingServiceHelper(object):
         """
         ri = RouterInfo(router_id, router)
         driver = self.driver_manager.set_driver(router)
-        if router[ROUTER_ROLE_ATTR] in \
-            [c_constants.ROUTER_ROLE_GLOBAL,
-             c_constants.ROUTER_ROLE_LOGICAL_GLOBAL]:
+        if router[ROUTER_ROLE_ATTR] in [
+            c_constants.ROUTER_ROLE_GLOBAL,
+            c_constants.ROUTER_ROLE_LOGICAL_GLOBAL]:
             # No need to create a vrf for Global or logical global routers
             LOG.debug("Skipping router_added device processing for %(id)s as "
                       "its role is %(role)s",
@@ -859,8 +899,7 @@ class RoutingServiceHelper(object):
             LOG.exception(_LE("ncclient Unexpected session close %s"
                               " while attempting to remove router"), e)
             if not self._dev_status.is_hosting_device_reachable(hd):
-                LOG.debug("Lost connectivity to Hosting Device"
-                          "%s" % (hd['id']))
+                LOG.debug("Lost connectivity to Hosting Device %s" % hd['id'])
                 # rely on heartbeat to detect HD state
                 # and schedule resync when the device comes back
             else:
@@ -868,7 +907,7 @@ class RoutingServiceHelper(object):
                 self.removed_routers.add(router_id)
                 LOG.debug("Interim connectivity lost to hosting device %s, "
                           "enqueuing router %s in removed_routers set" %
-                          (pp.pformat(hd), router_id))
+                          pp.pformat(hd), router_id)
 
     def _internal_network_added(self, ri, port, ex_gw_port):
         driver = self.driver_manager.get_driver(ri.id)
@@ -968,3 +1007,33 @@ class RoutingServiceHelper(object):
             subnet = port_subnets[0]
             prefixlen = netaddr.IPNetwork(subnet['cidr']).prefixlen
             port['ip_cidr'] = "%s/%s" % (ips[0]['ip_address'], prefixlen)
+
+
+    def bgp_speaker_create_end(self, context, bgp_speaker, host):
+        driver = self.driver_manager.get_driver_for_hosting_device(host['id'])
+        driver._asr_create_bgp_speaker(bgp_speaker, host)
+
+    def bgp_speaker_remove_end(self, context, bgp_speaker, host):
+        driver = self.driver_manager.get_driver_for_hosting_device(host['id'])
+        driver._asr_remove_bgp_speaker(bgp_speaker, host)
+
+    # make the peering relationship on the speaker side
+    def bgp_speaker_peer_added_end(self, context, bgp_speaker, host):
+        driver = self.driver_manager.get_driver_for_hosting_device(host['id'])
+        bgp_peer = bgp_speaker['bgp_peer']
+        driver._asr_add_bgp_peer(bgp_speaker, bgp_peer, host)
+
+    # make the peering relationship on the peer side
+    def p_bgp_speaker_peer_added_end(self, context, bgp_speaker, host):
+        driver = self.driver_manager.get_driver_for_hosting_device(host['id'])
+        bgp_peer = bgp_speaker['bgp_peer']
+        driver._asr_add_bgp_peer(bgp_speaker, bgp_peer, host, True)
+
+    def bgp_speaker_peer_remove_end(self, context, bgp_speaker, host):
+        driver = self.driver_manager.get_driver_for_hosting_device(host['id'])
+        bgp_peer = bgp_speaker['bgp_peer']
+        driver._asr_remove_bgp_peer(bgp_speaker, bgp_peer)
+
+
+
+
