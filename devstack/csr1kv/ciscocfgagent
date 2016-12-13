@@ -15,6 +15,7 @@ set +o xtrace
 
 function configure_ciscocfgagent {
     Q_CISCO_CFGAGENT_ENABLED=True
+    Q_CISCO_CFGAGENT_SIMULATE_DEVICES=${Q_CISCO_CFGAGENT_SIMULATE_DEVICES:-False}
     AGENT_CISCO_CFGAGENT_BINARY=${AGENT_CISCO_CFGAGENT_BINARY:-"$NEUTRON_BIN_DIR/neutron-cisco-cfg-agent"}
     CISCO_CFGAGENT_CONFIG_DIR=$NEUTRON_CONF_DIR/plugins/cisco
     mkdir -p $CISCO_CFGAGENT_CONFIG_DIR
@@ -27,6 +28,7 @@ function configure_ciscocfgagent {
     fi
     iniset $Q_CISCO_CFGAGENT_CONF_FILE DEFAULT verbose True
     iniset $Q_CISCO_CFGAGENT_CONF_FILE DEFAULT debug $ENABLE_DEBUG_LOG_LEVEL
+    iniset $Q_CISCO_CFGAGENT_CONF_FILE cfg_agent simulate_devices $Q_CISCO_CFGAGENT_SIMULATE_DEVICES
 }
 
 function init_ciscocfgagent {

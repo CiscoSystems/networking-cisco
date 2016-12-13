@@ -44,6 +44,8 @@ from networking_cisco import backwards_compatibility as bc
 from networking_cisco.plugins.cisco.cfg_agent import device_status
 from networking_cisco.plugins.cisco.common import (cisco_constants as
                                                    c_constants)
+from networking_cisco.plugins.cisco.common import utils
+
 
 LOG = logging.getLogger(__name__)
 
@@ -104,9 +106,9 @@ OPTS = [
                help=_("Path of the routing service helper class.")),
     cfg.BoolOpt('enable_heartbeat',
                 default=True,
-                help=_("If enabled, the agent will maintain a heartbeat "
-                       "against its hosting-devices. If a device dies "
-                       "and recovers, the agent will then trigger a "
+                help=_("If enabled, the config agent will maintain a "
+                       "heartbeat against its hosting-devices. If a device "
+                       "dies and recovers, the agent will trigger a "
                        "configuration resync.")),
     cfg.IntOpt('heartbeat_interval', default=5,
                help=_("Interval in seconds when the config agent runs the "
@@ -114,8 +116,8 @@ OPTS = [
     cfg.IntOpt('max_device_sync_attempts', default=6,
                help=_("Maximum number of attempts for a device sync.")),
     cfg.IntOpt('keepalive_interval', default=10,
-               help=_("Interval in seconds when the config agent sents a "
-                      "timestamp to the plugin to say that it is alive.")),
+               help=_("Interval in seconds by which the config agent sends a "
+                      "timestamp to the plugin to inform that it is alive.")),
     cfg.IntOpt('report_iteration', default=6,
                help=_("The iteration where the config agent sends a full "
                       "status report to the plugin.  The default is every "
@@ -123,6 +125,13 @@ OPTS = [
                       "means with default value of keepalive_interval "
                       "(10sec), a full report is sent once every "
                       "6*10 = 60 seconds.")),
+    cfg.BoolOpt('simulate_devices',
+                default=False,
+                help=_("If set to True, the config agent will simulate all"
+                       "hosting devices to be IOS XE devices. This is a "
+                       "convenience capability implemented (mainly) to allow "
+                       "developers to perform basic testing without having a"
+                       "testbed with real hosting devices.")),
 ]
 
 cfg.CONF.register_opts(OPTS, "cfg_agent")
@@ -539,6 +548,8 @@ def main(manager='networking_cisco.plugins.cisco.cfg_agent.'
     common_config.init(sys.argv[1:])
     conf(project='neutron')
     config.setup_logging()
+    if conf.cfg_agent.simulate_devices is True:
+        utils.mock_ncclient()
     server = neutron_service.Service.create(
         binary='neutron-cisco-cfg-agent',
         topic=c_constants.CFG_AGENT,

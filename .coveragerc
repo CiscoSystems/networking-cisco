@@ -1,7 +1,7 @@
 [run]
 branch = True
 source = networking_cisco
-omit = networking_cisco/tests/*,networking_cisco/openstack/*
+omit = networking_cisco/tests/*,networking_cisco/openstack/*,networking_cisco/plugins/cisco/common/cisco_ios_xe_simulator.py
 concurrency = greenlet
 
 [report]
