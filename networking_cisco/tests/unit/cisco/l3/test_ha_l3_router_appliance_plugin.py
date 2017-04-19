@@ -1465,6 +1465,45 @@ class HAL3RouterApplianceVMTestCase(
             self._rr_routes_update_cleanup(p2['id'], None, r['id'], rr1_id, [])
             self._routes_update_cleanup(p1['id'], None, r['id'], [])
 
+    def test_router_update_change_name_changes_redundancy_routers(self):
+        with self.router() as router:
+            r = router['router']
+            newName = 'routerOne'
+            params = "&".join(["id=%s" % rr['id'] for rr in
+                               r[ha.DETAILS][ha.REDUNDANCY_ROUTERS]])
+            r_routers = self._list('routers', query_params=params)['routers']
+            rr_name_start = 'router1' + ha_db.REDUNDANCY_ROUTER_SUFFIX
+            for rr in r_routers:
+                self.assertTrue(rr['name'].startswith(rr_name_start))
+            r_updated = self._update('routers', r['id'],
+                                     {'router': {'name': newName}})['router']
+            self.assertEqual(newName, r_updated['name'])
+            rr_name_start = newName + ha_db.REDUNDANCY_ROUTER_SUFFIX
+            r_routers = self._list('routers', query_params=params)['routers']
+            for rr in r_routers:
+                self.assertTrue(rr['name'].startswith(rr_name_start))
+
+    def test_name_change_of_redundancy_router_does_not_create_another_one(
+            self):
+        with self.router() as router:
+            r = router['router']
+            params = "&".join(["id=%s" % rr['id'] for rr in
+                               r[ha.DETAILS][ha.REDUNDANCY_ROUTERS]])
+            r_routers = self._list('routers', query_params=params)['routers']
+            self.assertEqual(2, len(r_routers))
+            newName = 'routerOne'
+            r_updated = self._update('routers', r_routers[0]['id'],
+                                     {'router': {'name': newName}})['router']
+            self.assertEqual(newName, r_updated['name'])
+            routers = self._list('routers')['routers']
+            # should have no new routers
+            self.assertEqual(3, len(routers))
+            r_ids = [rr['id'] for rr in r[ha.DETAILS][ha.REDUNDANCY_ROUTERS]]
+            r_ids.append(r['id'])
+            for r in routers:
+                self.assertIn(r['id'], r_ids)
+                r_ids.remove(r['id'])
+
     def test__notify_subnetpool_address_scope_update(self):
         l3_plugin = bc.get_plugin(bc.constants.L3)
 

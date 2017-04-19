@@ -272,6 +272,8 @@ class HA_db_mixin(object):
         """To be called in update_router() BEFORE router has been
         updated in DB.
         """
+        if r_hd_binding_db.role == ROUTER_ROLE_HA_REDUNDANCY:
+            return {ha.ENABLED: False}
         auto_enable_ha = r_hd_binding_db.router_type.ha_enabled_by_default
         requested_ha_details = router.pop(ha.DETAILS, {})
         # If ha_details are given then ha is assumed to be enabled even if
@@ -406,9 +408,14 @@ class HA_db_mixin(object):
                                         router_requested)
         # pick up updates to other attributes where it makes sense
         # and push - right now it is only admin_state_up.
+        other_updates_spec = {'router': {}}
         if 'admin_state_up' in update_specification['router']:
-            other_updates_spec = {'router': {'admin_state_up':
-                update_specification['router']['admin_state_up']}}
+            other_updates_spec['router']['admin_state_up'] = (
+                update_specification['router']['admin_state_up'])
+        if 'name' in update_specification['router']:
+            other_updates_spec['router']['name'] = (
+                update_specification['router']['name'])
+        if other_updates_spec['router']:
             self._process_other_router_updates(e_context, updated_router_db,
                                                other_updates_spec)
         # Ensure we get latest state from DB
@@ -444,7 +451,12 @@ class HA_db_mixin(object):
 
     def _process_other_router_updates(self, context, router_db, update_spec):
         rr_ids = []
+        new_name_stub = update_spec['router'].get('name')
         for r_b_db in router_db.redundancy_bindings:
+            if new_name_stub is not None:
+                idx = r_b_db.redundancy_router.name.split('_')[-1]
+                update_spec['router']['name'] = (
+                    new_name_stub + REDUNDANCY_ROUTER_SUFFIX + idx)
             update_spec['router'][ha.ENABLED] = False
             self._update_router_no_notify(
                 context, r_b_db.redundancy_router_id, update_spec)
@@ -704,11 +716,13 @@ class HA_db_mixin(object):
         port_info_list = self._core_plugin.get_ports(
             e_context, filters={'device_id': rr_ids,
                                 'network_id': [old_port['network_id']]},
-            fields=['device_id', 'id'])
+            fields=['device_id', 'fixed_ips', 'id'])
+        subnet_id = old_port['fixed_ips'][0]['subnet_id']
         for port_info in port_info_list:
-            interface_info = {'port_id': port_info['id']}
-            self.remove_router_interface(e_context, port_info['device_id'],
-                                         interface_info)
+            if port_info['fixed_ips'][0]['subnet_id'] == subnet_id:
+                interface_info = {'port_id': port_info['id']}
+                self.remove_router_interface(e_context, port_info['device_id'],
+                                             interface_info)
         self._delete_ha_group(e_context, old_port['id'])
 
     def _redundancy_routers_for_floatingip(
@@ -933,6 +947,15 @@ class HA_db_mixin(object):
         except (exc.NoResultFound, exc.MultipleResultsFound):
             return
         return r_ha_s
+
+    def get_ha_group(self, context, id):
+        query = context.session.query(RouterHAGroup)
+        query = query.filter(RouterHAGroup.id == id)
+        try:
+            r_ha_g = query.one()
+        except (exc.NoResultFound, exc.MultipleResultsFound):
+            return
+        return r_ha_g
 
     def _get_ha_group_by_ha_port_id(self, context, port_id):
         query = context.session.query(RouterHAGroup)
