@@ -97,79 +97,198 @@ class ASR1kRoutingDriver(iosxe_driver.IosXeRoutingDriver):
                                                           'p_id': port['id']})
                 self.external_gateway_added(ri, port)
             else:
-                LOG.debug("Adding IPv4 internal network port: %(port)s "
-                          "for router %(r_id)s", {'port': port, 'r_id': ri.id})
-                nw_id = port['network_id']
+                LOG.debug("Adding IPv4 internal network port: %(p_id)s "
+                          "for router %(r_id)s", {'p_id': port['id'],
+                                                  'r_id': ri.id})
                 details = port['change_details']
-                former_ports = self._get_change_details(nw_id, details,
-                                                        'former_ports')
-                old_ports = self._get_change_details(nw_id, details,
-                                                     'old_ports')
+                LOG.debug('Add - change details: former: %(f_ips)s, old: '
+                          '%(o_ips)s, new: %(n_ips)s, current: %(c_ips)s',
+                          {'f_ips': [p['fixed_ips'][0]['ip_address'] for p in
+                                     details['former_ports']],
+                           'o_ips': [p['fixed_ips'][0]['ip_address'] for p in
+                                     details['old_ports']],
+                           'n_ips': [p['fixed_ips'][0]['ip_address'] for p in
+                                     details['new_ports']],
+                           'c_ips': [p['fixed_ips'][0]['ip_address'] for p in
+                                     details['current_ports']]})
+                former_ports = details['former_ports']
+                old_ports = details['old_ports']
                 if port['ip_info']['is_primary'] is False:
                     # port to be configured as a secondary
+                    LOG.debug('Configuring %(ip)s as SECONDARY address for '
+                              'port %(p_id)s of router %(r_id)s',
+                              {'ip': port['fixed_ips'][0]['ip_address'],
+                               'p_id': port['id'], 'r_id': ri.id})
                     self._set_secondary_ipv4(ri, port)
                 elif not former_ports:
                     # port is first one on network so must create sub-interface
                     # and configure port as primary
+                    LOG.debug('Creating sub-interface and configuring %(ip)s '
+                              'as PRIMARY address for first port %(p_id)s on '
+                              'network for router %(r_id)s',
+                              {'ip': port['fixed_ips'][0]['ip_address'],
+                               'p_id': port['id'], 'r_id': ri.id})
                     self._create_sub_interface(ri, port)
                 elif old_ports and old_ports[0] == former_ports[0]['id']:
                     # former primary will be deleted so sub-interface already
                     # exists so can just configure port as primary
+                    LOG.debug('Configuring %(ip)s as PRIMARY address for port '
+                              '%(p_id)s of router %(r_id)s since port '
+                              '%(fp_id)s providing former primary address '
+                              '%(f_ip)s is to be deleted',
+                              {'ip': port['fixed_ips'][0]['ip_address'],
+                               'p_id': port['id'], 'r_id': ri.id,
+                               'fp_id': former_ports[0]['id'],
+                               'f_ip': former_ports[0]['fixed_ips'][0][
+                                   'ip_address']})
                     self._set_primary_ipv4(ri, port)
                 else:
                     # port is the new primary
+                    LOG.debug('Configuring %(ip)s as new PRIMARY address for '
+                              'port %(p_id)s of router %(r_id)s',
+                              {'ip': port['fixed_ips'][0]['ip_address'],
+                               'p_id': port['id'], 'r_id': ri.id})
                     self._set_primary_ipv4(ri, port)
                     # former primary remains and thus must become a secondary
+                    LOG.debug('Configuring %(ip)s as SECONDARY address for '
+                              'former primary port %(p_id)s of router '
+                              '%(r_id)s',
+                              {'ip': former_ports[0]['fixed_ips'][0][
+                                  'ip_address'],
+                               'p_id': former_ports[0]['id'], 'r_id': ri.id})
+                    self._set_subnet_info(
+                        former_ports[0],
+                        former_ports[0]['fixed_ips'][0]['subnet_id'], False)
                     self._set_secondary_ipv4(ri, former_ports[0])
 
     def internal_network_removed(self, ri, port):
         if self._is_global_router(ri):
             self._remove_sub_interface(port)
         else:
-            nw_id = port['network_id']
             details = port['change_details']
-            former_ports = self._get_change_details(nw_id, details,
-                                                    'former_ports')
-            new_ports = self._get_change_details(nw_id, details)
-            current_ports = self._get_change_details(nw_id, details,
-                                                     'current_ports')
+            LOG.debug('Remove - change details: former: %(f_ips)s, old: '
+                      '%(o_ips)s, new: %(n_ips)s, current: %(c_ips)s',
+                      {'f_ips': [p['fixed_ips'][0]['ip_address'] for p in
+                                 details['former_ports']],
+                       'o_ips': [p['fixed_ips'][0]['ip_address'] for p in
+                                 details['old_ports']],
+                       'n_ips': [p['fixed_ips'][0]['ip_address'] for p in
+                                 details['new_ports']],
+                       'c_ips': [p['fixed_ips'][0]['ip_address'] for p in
+                                 details['current_ports']]})
+            former_ports = details['former_ports']
+            new_ports = details['new_ports']
+            current_ports = details['current_ports']
             if port['ip_info']['is_primary'] is False:
+                LOG.debug('Port %(p_id)s that provides %(ip)s used as '
+                          'SECONDARY address is to be removed',
+                          {'p_id': port['id'],
+                           'ip': port['fixed_ips'][0]['ip_address']})
                 # since port is a secondary it can just be removed
                 if current_ports:
                     # only explicitly de-configure if other ports on same
                     # network remain since the sub-interface removal will
                     # otherwise take care of secondaries automatically
+                    LOG.debug('IPv4 address %(ip)s of port %(p_id)s is '
+                              'DECONFIGURED as SECONDARY address since router '
+                              '%(r_id)s has other ports on the network',
+                              {'ip': port['fixed_ips'][0]['ip_address'],
+                               'p_id': port['id'], 'r_id': ri.id})
                     self._remove_secondary_ipv4(ri, port)
             elif len(former_ports) == 1:
                 # port was the only port on network (thus also the primary)
                 if not new_ports:
                     # no new port on that network is added so we can just
                     # remove the sub-interface
+                    LOG.debug('Port %(p_id)s that provides %(ip)s used as '
+                              'PRIMARY address is to be removed and router '
+                              '%(r_id)s has NO new ports NOR remaining ports '
+                              'on network so SUB-INTERFACE WILL BE DELETED.',
+                              {'p_id': port['id'],
+                               'ip': port['fixed_ips'][0]['ip_address'],
+                               'r_id': ri.id})
                     self._remove_sub_interface(port)
                 else:
                     # the new primary has already be configured as new ports
                     # are processed before ports that have been removed
                     # NOTHING MORE TO DD
-                    pass
+                    LOG.debug('The router (%(r_id)s)\'s ONLY port %(p_id)s on '
+                              'network that thus provided %(ip)s used as '
+                              'PRIMARY address is to be removed. But '
+                              'the router has a NEW port %(np_id)s on network '
+                              'that with IPv4 %(n_ip)s has already been '
+                              'configured as primary so NOTHING MORE TO DO '
+                              'HERE.',
+                              {'r_id': ri.id, 'p_id': port['id'],
+                               'ip': port['fixed_ips'][0]['ip_address'],
+                               'np_id': current_ports[0]['id'],
+                               'n_ip': current_ports[0]['fixed_ips'][0][
+                                   'ip_address']})
             elif not new_ports:
                 # port was one of several ports on network but no new ports
                 # were added so one of the existing ports (if any exist) will
                 # change role from secondary to be the new primary
                 if current_ports:
+                    LOG.debug('Port %(p_id)s that provides %(ip)s used as '
+                              'PRIMARY address is to be removed. But router '
+                              '%(r_id)s has other REMAINING port %(fp_id)s '
+                              'with IPv4 address %(f_ip)s that is '
+                              'RECONFIGURED from secondary to primary.',
+                              {'p_id': port['id'],
+                               'ip': port['fixed_ips'][0]['ip_address'],
+                               'r_id': ri.id,
+                               'fp_id': current_ports[0]['id'],
+                               'f_ip': current_ports[0]['fixed_ips'][0][
+                                   'ip_address']})
+                    self._set_subnet_info(
+                        current_ports[0],
+                        current_ports[0]['fixed_ips'][0]['subnet_id'])
                     self._remove_secondary_ipv4(ri, current_ports[0])
                     self._set_primary_ipv4(ri, current_ports[0])
                 else:
                     # no ports on that network remain so we can just remove
                     # the sub-interface
+                    LOG.debug('Port %(p_id)s that provides %(ip)s used as '
+                              'PRIMARY address is to be removed. Router '
+                              '%(r_id)s has NO remaining ports NOR any new '
+                              'ports on network so SUB-INTERFACE WILL BE '
+                              'DELETED.',
+                              {'p_id': port['id'],
+                               'ip': port['fixed_ips'][0]['ip_address'],
+                               'r_id': ri.id})
                     self._remove_sub_interface(port)
             elif new_ports[0]['id'] == current_ports[0]['id']:
                 # one of the new ports is the new primary at it will already
                 # have overwritten the old primary so we're done
                 # NOTHING MORE TO DO
-                pass
+                LOG.debug('Port %(p_id)s that provides %(ip)s used as '
+                          'PRIMARY address is to be removed. But router '
+                          '%(r_id)s has a NEW port %(np_id)s with IPv4 '
+                          'address %(n_ip)s that has already been'
+                          'CONFIGURED AS PRIMARY ',
+                          {'p_id': port['id'],
+                           'ip': port['fixed_ips'][0]['ip_address'],
+                           'r_id': ri.id,
+                           'np_id': current_ports[0]['id'],
+                           'n_ip': current_ports[0]['fixed_ips'][0][
+                               'ip_address']})
             else:
                 # no new new port is a new primary so one of the existing
                 # ports will change role from secondary to be the new primary
+                LOG.debug('Port %(p_id)s that provides %(ip)s used as '
+                          'PRIMARY address is to be removed. But router '
+                          '%(r_id)s has new ports and a REMAINING port '
+                          '%(fp_id)s with IPv4 address %(f_ip)s that is '
+                          'RECONFIGURED FROM SECONDARY TO PRIMARY.',
+                          {'p_id': port['id'],
+                           'ip': port['fixed_ips'][0]['ip_address'],
+                           'r_id': ri.id,
+                           'fp_id': current_ports[0]['id'],
+                           'f_ip': current_ports[0]['fixed_ips'][0][
+                               'ip_address']})
+                self._set_subnet_info(
+                    current_ports[0],
+                    current_ports[0]['fixed_ips'][0]['subnet_id'])
                 self._remove_secondary_ipv4(ri, current_ports[0])
                 self._set_primary_ipv4(ri, current_ports[0])
 
@@ -289,8 +408,22 @@ class ASR1kRoutingDriver(iosxe_driver.IosXeRoutingDriver):
             params = {'key': e}
             raise cfg_exc.DriverExpectedKeyNotSetException(**params)
 
-    def _get_change_details(self, network_id, details, category='new_ports'):
-        return details.get(network_id, {}).get(category, [])
+#    def _get_change_details(self, details, category='new_ports'):
+#        return details.get(category, [])
+
+    @staticmethod
+    def _set_subnet_info(port, subnet_id, is_primary=True):
+        ip = next((i['ip_address'] for i in port['fixed_ips']
+                   if i['subnet_id'] == subnet_id), None)
+        if ip is None:
+            # there will be KeyError exception later if this happens
+            LOG.error(_LE('Port %(p_id)s lacks IP address on subnet %(s_id)s'),
+                      {'p_id': port['id'], 's_id': subnet_id})
+            return
+        subnet = next(sn for sn in port['subnets'] if sn['id'] == subnet_id)
+        prefixlen = netaddr.IPNetwork(subnet['cidr']).prefixlen
+        port['ip_info'] = {'subnet_id': subnet_id, 'is_primary': is_primary,
+                           'ip_cidr': "%s/%s" % (ip, prefixlen)}
 
     @staticmethod
     def _get_item(list_containing_dicts_entries, attribute_value,

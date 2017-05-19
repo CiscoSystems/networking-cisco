@@ -51,9 +51,8 @@ LOG = logging.getLogger(__name__)
 N_ROUTER_PREFIX = 'nrouter-'
 ROUTER_ROLE_ATTR = routerrole.ROUTER_ROLE_ATTR
 
-# Number of routers to fetch from server at a time on resync.
+# Minimum number of routers to fetch from server at a time on resync.
 # Needed to reduce load on server side and to speed up resync on agent side.
-SYNC_ROUTERS_MAX_CHUNK_SIZE = 64
 SYNC_ROUTERS_MIN_CHUNK_SIZE = 8
 
 
@@ -198,7 +197,8 @@ class RoutingServiceHelper(object):
         self.sync_devices = set()
         self.sync_devices_attempts = 0
         self.fullsync = True
-        self.sync_routers_chunk_size = SYNC_ROUTERS_MAX_CHUNK_SIZE
+        self.sync_routers_chunk_size = (
+            cfg.CONF.cfg_agent.max_device_sync_batch_size)
         self.topic = '%s.%s' % (c_constants.CFG_AGENT_L3_ROUTING, host)
 
         self.hardware_router_type = None
@@ -255,7 +255,7 @@ class RoutingServiceHelper(object):
             removed_routers = []
             all_routers_flag = False
             if self.fullsync:
-                LOG.debug("FullSync flag is on. Starting fullsync")
+                LOG.debug("The fullsync flag is set. Starting complete sync")
                 # Setting all_routers_flag and clear the global full_sync flag
                 all_routers_flag = True
                 self.fullsync = False
@@ -270,12 +270,12 @@ class RoutingServiceHelper(object):
             else:
                 if self.updated_routers:
                     router_ids = list(self.updated_routers)
-                    LOG.debug("Updated routers:%s", router_ids)
+                    LOG.debug("Updated routers: %s", router_ids)
                     self.updated_routers.clear()
                     routers = self._fetch_router_info(router_ids=router_ids)
-                    LOG.debug("Updated routers:%s" % (pp.pformat(routers)))
+                    LOG.debug("Updated routers: %s" % (pp.pformat(routers)))
                 if device_ids:
-                    LOG.debug("Adding new devices:%s", device_ids)
+                    LOG.debug("Adding new devices: %s", device_ids)
                     self.sync_devices = set(device_ids) | self.sync_devices
                 if self.sync_devices:
                     self._handle_sync_devices(routers)
@@ -286,7 +286,7 @@ class RoutingServiceHelper(object):
                         self.removed_routers = self.removed_routers | set(ids)
                 if self.removed_routers:
                     removed_routers_ids = list(self.removed_routers)
-                    LOG.debug("Removed routers:%s",
+                    LOG.debug("Removed routers: %s",
                               pp.pformat(removed_routers_ids))
                     for r in removed_routers_ids:
                         if r in self.router_info:
@@ -367,7 +367,9 @@ class RoutingServiceHelper(object):
                         "hosting_device": routers[0]['hosting_device'],
                         "router_type": routers[0]['router_type']}
             driver = self.driver_manager.set_driver(temp_res)
-
+            LOG.debug("Running config sync for hosting device %(hd_id)s that "
+                      "should host %(num_r)d routers",
+                      {'hd_id': hd_id, 'num_r': len(routers)})
             driver.cleanup_invalid_cfg(
                 routers[0]['hosting_device'], routers)
 
@@ -383,13 +385,17 @@ class RoutingServiceHelper(object):
         """
         try:
             if all_routers:
+                LOG.debug('Fetching all routers')
                 router_ids = self.plugin_rpc.get_router_ids(self.context)
                 return self._fetch_router_chunk_data(router_ids)
 
             if router_ids:
+                LOG.debug('Fetching routers: %(r_ids)s', {'r_ids': router_ids})
                 return self._fetch_router_chunk_data(router_ids)
 
             if device_ids:
+                LOG.debug('Fetching routers for hosting devices %(hd_ids)s',
+                          {'hd_ids':  device_ids})
                 return self.plugin_rpc.get_routers(self.context,
                                                    hd_ids=device_ids)
         except oslo_messaging.MessagingTimeout:
@@ -397,15 +403,15 @@ class RoutingServiceHelper(object):
                 self.sync_routers_chunk_size = max(
                     self.sync_routers_chunk_size / 2,
                     SYNC_ROUTERS_MIN_CHUNK_SIZE)
-                LOG.error(_LE('Server failed to return info for routers in '
-                              'required time, decreasing chunk size to: %s'),
-                          self.sync_routers_chunk_size)
+                LOG.warning(_LW('Server failed to return info for routers in '
+                                'required time, decreasing chunk size to: %s'),
+                            self.sync_routers_chunk_size)
             else:
-                LOG.error(_LE('Server failed to return info for routers in '
-                              'required time even with min chunk size: %s. '
-                              'It might be under very high load or '
-                              'just inoperable'),
-                          self.sync_routers_chunk_size)
+                LOG.warning(_LW('Server failed to return info for routers in '
+                                'required time even with min chunk size: %s. '
+                                'It might be under very high load or just '
+                                'inoperable'),
+                            self.sync_routers_chunk_size)
             raise
         except oslo_messaging.MessagingException:
             LOG.exception(_LE("RPC Error in fetching routers from plugin"))
@@ -415,10 +421,11 @@ class RoutingServiceHelper(object):
 
         LOG.debug("Periodic_sync_routers_task successfully completed")
         # adjust chunk size after successful sync
-        if self.sync_routers_chunk_size < SYNC_ROUTERS_MAX_CHUNK_SIZE:
+        if (self.sync_routers_chunk_size <
+                cfg.CONF.cfg_agent.max_device_sync_batch_size):
             self.sync_routers_chunk_size = min(
                 self.sync_routers_chunk_size + SYNC_ROUTERS_MIN_CHUNK_SIZE,
-                SYNC_ROUTERS_MAX_CHUNK_SIZE)
+                cfg.CONF.cfg_agent.max_device_sync_batch_size)
 
     def _fetch_router_chunk_data(self, router_ids=None):
 
@@ -599,11 +606,16 @@ class RoutingServiceHelper(object):
         :return: None
         """
         try:
+            ids_previously_hosted_routers = (
+                set(r_id for r_id, rdata in self.router_info.items()
+                    if rdata.router.get('hosting_device',
+                                        {}).get('id') == device_id))
+
             if all_routers:
-                prev_router_ids = set(self.router_info)
+                prev_router_ids = ids_previously_hosted_routers
             else:
-                prev_router_ids = set(self.router_info) & set(
-                    [router['id'] for router in routers])
+                prev_router_ids = (ids_previously_hosted_routers &
+                                   set([router['id'] for router in routers]))
             cur_router_ids = set()
             deleted_routerids_list = []
 
@@ -655,7 +667,7 @@ class RoutingServiceHelper(object):
                         _LE("ncclient Unexpected session close %s"), e)
                     if not self._dev_status.is_hosting_device_reachable(
                         r['hosting_device']):
-                        LOG.debug("Lost connectivity to Hosting Device %s" %
+                        LOG.debug("Lost connectivity to hosting device %s" %
                                   r['hosting_device']['id'])
                         # Will rely on heartbeat to detect hd state
                         # and schedule resync when hd comes back
@@ -793,9 +805,21 @@ class RoutingServiceHelper(object):
                 # port p is one of at least two ports on the network so we must
                 # configure one as primary and the others as secondary
                 is_primary = current_ports_on_network[0]['id'] == p['id']
+                LOG.debug('Processing new port %(p_id)s with IPv4 %(ip)s '
+                          'which should be %(type)s address. The router has '
+                          'additional ports on the network (on different '
+                          'subnets).',
+                          {'p_id': p['id'],
+                           'type': 'primary' if is_primary else 'secondary',
+                           'ip': p['fixed_ips'][0]['ip_address']})
             else:
                 # only one port on network so is must be the primary
                 is_primary = True
+                LOG.debug('Processing new port %(p_id)s with IPv4 %(ip)s '
+                          'which should be primary address as router has no '
+                          'other ports on network',
+                          {'p_id': p['id'],
+                           'ip': p['fixed_ips'][0]['ip_address']})
             self._set_subnet_info(p, p['subnets'][0]['id'], is_primary)
             self._internal_network_added(ri, p, ex_gw_port)
 
@@ -819,8 +843,8 @@ class RoutingServiceHelper(object):
             # as well as on all HA backup routers.
             port_subnets = sorted(p['subnets'], key=itemgetter('id'))
             num_subnets_on_port = len(port_subnets)
-            LOG.debug("Number of subnets associated with router port = %d" %
-                      num_subnets_on_port)
+            LOG.debug("Number of subnets associated with new Global router "
+                      "port = %d", num_subnets_on_port)
             # Configure the primary IP address
             self._set_subnet_info(p, port_subnets[0]['id'])
             self._internal_network_added(ri, p, ex_gw_port)
@@ -843,9 +867,21 @@ class RoutingServiceHelper(object):
                 # port p is one of at least two ports on the network
                 # so we must deconfigure it accordingly
                 is_primary = former_ports_on_network[0]['id'] == p['id']
+                LOG.debug('Processing deletion of port %(p_id)s with IPv4 '
+                          '%(ip)s which was %(type)s address. The router has '
+                          'additional ports on the network (on different '
+                          'subnets).',
+                          {'p_id': p['id'],
+                           'type': 'primary' if is_primary else 'secondary',
+                           'ip': p['fixed_ips'][0]['ip_address']})
             else:
                 # only one port on network so is must be the primary
                 is_primary = True
+                LOG.debug('Processing deletion of port %(p_id)s with IPv4 '
+                          '%(ip)s which was primary address as router had no '
+                          'other ports on network',
+                          {'p_id': p['id'],
+                           'ip': p['fixed_ips'][0]['ip_address']})
             self._set_subnet_info(p, p['subnets'][0]['id'], is_primary)
             self._internal_network_removed(ri, p, ri.ex_gw_port)
             ri.internal_ports.remove(p)
@@ -1106,7 +1142,7 @@ class RoutingServiceHelper(object):
         ri = self.router_info.get(router_id)
         if ri is None:
             LOG.warning(_LW("Info for router %s was not found. "
-                            "Skipping router removal"), router_id)
+                            "Skipping router removal."), router_id)
             return
         ri.router['gw_port'] = None
         ri.router[bc.constants.INTERFACE_KEY] = []

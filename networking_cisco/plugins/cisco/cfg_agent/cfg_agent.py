@@ -113,6 +113,9 @@ OPTS = [
                       "backlog / hosting-device heart beat task.")),
     cfg.IntOpt('max_device_sync_attempts', default=6,
                help=_("Maximum number of attempts for a device sync.")),
+    cfg.IntOpt('max_device_sync_batch_size', default=64,
+               help=_("The largest number of routers to fetch in one "
+                      "RPC call.")),
     cfg.IntOpt('keepalive_interval', default=10,
                help=_("Interval in seconds when the config agent sents a "
                       "timestamp to the plugin to say that it is alive.")),
@@ -479,51 +482,6 @@ class CiscoCfgAgentWithStateReport(CiscoCfgAgent):
             LOG.warning(_LW("Failed sending agent report!"))
 
 
-def _mock_stuff():
-    import mock
-
-    targets = ['networking_cisco.plugins.cisco.cfg_agent.device_drivers.'
-               'csr1kv.csr1kv_routing_driver.manager',
-               'networking_cisco.plugins.cisco.cfg_agent.device_drivers.'
-               'csr1kv.iosxe_routing_driver.manager']
-    ncc_patchers = []
-    ncclient_mock = mock.MagicMock()
-    ok_xml_obj = mock.MagicMock()
-    ok_xml_obj.xml = "<ok />"
-    ncclient_mock.connect.return_value.edit_config.return_value = ok_xml_obj
-    for target in targets:
-        patcher = mock.patch(target, ncclient_mock)
-        patcher.start()
-        ncc_patchers.append(patcher)
-
-    targets = ['networking_cisco.plugins.cisco.cfg_agent.device_drivers'
-               '.csr1kv.csr1kv_routing_driver.CSR1kvRoutingDriver.'
-               '_get_running_config',
-               'networking_cisco.plugins.cisco.cfg_agent.device_drivers.'
-               'csr1kv.iosxe_routing_driver.IosXeRoutingDriver.'
-               '_get_running_config',
-               'networking_cisco.plugins.cisco.cfg_agent.device_drivers.'
-               'asr1k.asr1k_cfg_syncer.ConfigSyncer.get_running_config',
-               'networking_cisco.plugins.cisco.cfg_agent.device_drivers.asr1k.'
-               'asr1k_cfg_syncer.ConfigSyncer.get_running_config']
-    fake_running_config = ("interface GigabitEthernet1\n"
-                           "ip address 10.0.0.10 255.255.255.255\n"
-                           "ip route 0.0.0.0 0.0.0.0 GigabitEthernet1 "
-                           "10.0.0.1")
-    g_r_c_patchers = []
-    g_r_c_mock = mock.MagicMock(return_value=fake_running_config)
-    for target in targets:
-        patcher = mock.patch(target, g_r_c_mock)
-        patcher.start()
-        g_r_c_patchers.append(patcher)
-
-    is_pingable_mock = mock.MagicMock(return_value=True)
-    pingable_patcher = mock.patch(
-        'networking_cisco.plugins.cisco.cfg_agent.device_status._is_pingable',
-        is_pingable_mock)
-    pingable_patcher.start()
-
-
 # NOTE(bobmel): call mock_ncclient() in main() of cfg_agent.py to run config
 # agent with a fake ncclient. That mocked mode of running the config agent is
 # useful for end-2-end-like debugging without actual backend hosting devices.
@@ -613,7 +571,6 @@ def main(manager='networking_cisco.plugins.cisco.cfg_agent.'
     # NOTE(bobmel): call _mock_stuff() to run config agent with fake ncclient
     # This mocked mode of running the config agent is useful for end-2-end-like
     # debugging without actual backend hosting devices.
-    #_mock_stuff()
     #mock_ncclient()
     conf = cfg.CONF
     conf.register_opts(OPTS, "cfg_agent")
